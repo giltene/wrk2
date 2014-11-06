@@ -458,7 +458,7 @@ static int response_complete(http_parser *parser) {
         uint64_t timing = now - c->start;
         stats_record(thread->latency, timing);
         hdr_record_value(thread->latency_histogram, timing);
-        hdr_record_corrected_value(thread->corrected_histogram, timing, thread->interval);
+        hdr_record_corrected_value(thread->corrected_histogram, timing, thread->interval * 1000);
         aeCreateFileEvent(thread->loop, c->fd, AE_WRITABLE, socket_writeable, c);
     }
 
