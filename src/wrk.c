@@ -344,6 +344,7 @@ static int calibrate(aeEventLoop *loop, long long id, void *data) {
     thread *thread = data;
 
     (void) stats_summarize(thread->latency);
+    long double mean = stats_mean(thread->latency);
     long double latency = stats_percentile(thread->latency, 90.0) / 1000.0L;
     long double interval = MAX(latency * 2, 10);
     long double rate = (interval / latency) * thread->connections;
@@ -354,6 +355,7 @@ static int calibrate(aeEventLoop *loop, long long id, void *data) {
     thread->rate     = ceil(rate / 10);
     thread->start    = time_us();
     thread->requests = 0;
+    thread->mean     = (uint64_t) mean;
     stats_reset(thread->latency);
     hdr_reset(thread->latency_histogram);
     hdr_reset(thread->corrected_histogram);
@@ -458,7 +460,7 @@ static int response_complete(http_parser *parser) {
         uint64_t timing = now - c->start;
         stats_record(thread->latency, timing);
         hdr_record_value(thread->latency_histogram, timing);
-        hdr_record_corrected_value(thread->corrected_histogram, timing, thread->interval * 1000);
+        hdr_record_corrected_value(thread->corrected_histogram, timing, thread->mean);
         aeCreateFileEvent(thread->loop, c->fd, AE_WRITABLE, socket_writeable, c);
     }
 
