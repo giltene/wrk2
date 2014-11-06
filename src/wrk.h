@@ -61,6 +61,8 @@ typedef struct connection {
     buffer headers;
     buffer body;
     char buf[RECVBUF];
+    uint64_t latency_start;
+    bool has_pending;
 } connection;
 
 #endif /* WRK_H */

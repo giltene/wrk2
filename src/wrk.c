@@ -360,6 +360,8 @@ static int calibrate(aeEventLoop *loop, long long id, void *data) {
     hdr_reset(thread->latency_histogram);
     hdr_reset(thread->corrected_histogram);
 
+    printf("Interval: %d, mean: %lld, latency: %Lf\n", thread->interval, thread->mean, latency);
+
     aeCreateTimeEvent(loop, thread->interval, sample_rate, thread, NULL);
 
     return AE_NOMORE;
@@ -457,10 +459,11 @@ static int response_complete(http_parser *parser) {
     }
 
     if (--c->pending == 0) {
-        uint64_t timing = now - c->start;
-        stats_record(thread->latency, timing);
-        hdr_record_value(thread->latency_histogram, timing);
-        hdr_record_corrected_value(thread->corrected_histogram, timing, thread->mean);
+        stats_record(thread->latency, now - c->start);
+        uint64_t latency_timing = now - c->latency_start;
+        hdr_record_value(thread->latency_histogram, latency_timing);
+        hdr_record_corrected_value(thread->corrected_histogram, latency_timing, thread->mean);
+        c->has_pending = false;
         aeCreateFileEvent(thread->loop, c->fd, AE_WRITABLE, socket_writeable, c);
     }
 
@@ -518,6 +521,10 @@ static void socket_writeable(aeEventLoop *loop, int fd, void *data, int mask) {
 
     if (!c->written) {
         c->start = time_us();
+        if (!c->has_pending) {
+            c->latency_start = c->start;
+            c->has_pending = true;
+        }
         c->pending = cfg.pipeline;
     }
 
