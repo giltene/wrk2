@@ -13,6 +13,7 @@
 #include "ae.h"
 #include "script.h"
 #include "http_parser.h"
+#include "hdr_histogram.h"
 
 #define VERSION  "3.1.1"
 #define RECVBUF  8192
@@ -35,6 +36,8 @@ typedef struct {
     uint64_t rate;
     uint64_t missed;
     stats *latency;
+    struct hdr_histogram *latency_histogram;
+    struct hdr_histogram *corrected_histogram;
     tinymt64_t rand;
     lua_State *L;
     errors errors;

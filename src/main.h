@@ -54,5 +54,6 @@ static int parse_args(struct config *, char **, char **, int, char **);
 static void print_stats_header();
 static void print_stats(char *, stats *, char *(*)(long double));
 static void print_stats_latency(stats *);
+static void print_hdr_latency(struct hdr_histogram*, const char*);
 
 #endif /* MAIN_H */

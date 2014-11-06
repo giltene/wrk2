@@ -2,6 +2,10 @@
 
 #include "wrk.h"
 #include "main.h"
+#include "hdr_histogram.h"
+
+// Max recordable latency of 1 day
+#define MAX_LATENCY 24L * 60 * 60 * 1000000
 
 static struct config {
     struct addrinfo addr;
@@ -19,6 +23,8 @@ static struct config {
 static struct {
     stats *latency;
     stats *requests;
+    struct hdr_histogram *latency_histogram;
+    struct hdr_histogram *corrected_histogram;
     pthread_mutex_t mutex;
 } statistics;
 
@@ -130,6 +136,8 @@ int main(int argc, char **argv) {
     pthread_mutex_init(&statistics.mutex, NULL);
     statistics.latency  = stats_alloc(SAMPLES);
     statistics.requests = stats_alloc(SAMPLES);
+    hdr_init(1, MAX_LATENCY, 3, &statistics.latency_histogram);
+    hdr_init(1, MAX_LATENCY, 3, &statistics.corrected_histogram);
 
     thread *threads = zcalloc(cfg.threads * sizeof(thread));
     uint64_t connections = cfg.connections / cfg.threads;
@@ -190,6 +198,9 @@ int main(int argc, char **argv) {
         errors.write   += t->errors.write;
         errors.timeout += t->errors.timeout;
         errors.status  += t->errors.status;
+
+        hdr_add(statistics.latency_histogram, t->latency_histogram);
+        hdr_add(statistics.corrected_histogram, t->corrected_histogram);
     }
 
     uint64_t runtime_us = time_us() - start;
@@ -200,7 +211,24 @@ int main(int argc, char **argv) {
     print_stats_header();
     print_stats("Latency", statistics.latency, format_time_us);
     print_stats("Req/Sec", statistics.requests, format_metric);
-    if (cfg.latency) print_stats_latency(statistics.latency);
+    if (cfg.latency) {
+        print_stats_latency(statistics.latency);
+
+        struct hdr_histogram* sampled_histogram;
+        hdr_init(1, MAX_LATENCY, 3, &sampled_histogram);
+
+        for (int i = 0; i < statistics.latency->limit; i++) {
+            hdr_record_value(sampled_histogram, statistics.latency->data[i]);
+        }
+
+        printf("---\n");
+        print_hdr_latency(sampled_histogram, "As Sampled");
+        printf("---\n");
+        print_hdr_latency(statistics.latency_histogram, "Measured");
+        printf("---\n");
+        print_hdr_latency(statistics.corrected_histogram, "Corrected");
+        printf("---\n");
+    }
 
     char *runtime_msg = format_time_us(runtime_us);
 
@@ -234,6 +262,8 @@ void *thread_main(void *arg) {
     thread->cs = zcalloc(thread->connections * sizeof(connection));
     tinymt64_init(&thread->rand, time_us());
     thread->latency = stats_alloc(100000);
+    hdr_init(1, MAX_LATENCY, 3, &thread->latency_histogram);
+    hdr_init(1, MAX_LATENCY, 3, &thread->corrected_histogram);
 
     char *request = NULL;
     size_t length = 0;
@@ -325,6 +355,8 @@ static int calibrate(aeEventLoop *loop, long long id, void *data) {
     thread->start    = time_us();
     thread->requests = 0;
     stats_reset(thread->latency);
+    hdr_reset(thread->latency_histogram);
+    hdr_reset(thread->corrected_histogram);
 
     aeCreateTimeEvent(loop, thread->interval, sample_rate, thread, NULL);
 
@@ -423,7 +455,10 @@ static int response_complete(http_parser *parser) {
     }
 
     if (--c->pending == 0) {
-        stats_record(thread->latency, now - c->start);
+        uint64_t timing = now - c->start;
+        stats_record(thread->latency, timing);
+        hdr_record_value(thread->latency_histogram, timing);
+        hdr_record_corrected_value(thread->corrected_histogram, timing, thread->interval);
         aeCreateFileEvent(thread->loop, c->fd, AE_WRITABLE, socket_writeable, c);
     }
 
@@ -637,6 +672,20 @@ static void print_stats(char *name, stats *stats, char *(*fmt)(long double)) {
     print_units(stdev, fmt, 10);
     print_units(max,   fmt, 9);
     printf("%8.2Lf%%\n", stats_within_stdev(stats, mean, stdev, 1));
+}
+
+static void print_hdr_latency(struct hdr_histogram* histogram, const char* description) {
+    long double percentiles[] = { 50.0, 75.0, 90.0, 99.0 };
+    printf("  Latency Distribution (HDR - %s)\n", description);
+    for (size_t i = 0; i < sizeof(percentiles) / sizeof(long double); i++) {
+        long double p = percentiles[i];
+        int64_t n = hdr_value_at_percentile(histogram, p);
+        printf("%7.0Lf%%", p);
+        print_units(n, format_time_us, 10);
+        printf("\n");
+    }
+    printf("%s\n", "Histogram");
+    hdr_percentiles_print(histogram, stdout, 5, 1.0, CLASSIC);
 }
 
 static void print_stats_latency(stats *stats) {
