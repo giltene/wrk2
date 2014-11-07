@@ -14,6 +14,7 @@ static struct config {
     uint64_t duration;
     uint64_t timeout;
     uint64_t pipeline;
+    uint64_t delay_ms;
     bool     latency;
     bool     dynamic;
     char    *script;
@@ -58,6 +59,9 @@ static void usage() {
            "        --latency          Print latency statistics   \n"
            "        --timeout     <T>  Socket/request timeout     \n"
            "    -v, --version          Print version details      \n"
+           "        --delay       <T>  Think time (ms) between    \n"
+           "                           each request, default = 0  \n"
+           "                                                      \n"
            "                                                      \n"
            "  Numeric arguments may include a SI unit (1k, 1M, 1G)\n"
            "  Time arguments may include a time unit (2s, 2m, 2h)\n");
@@ -180,6 +184,7 @@ int main(int argc, char **argv) {
     char *time = format_time_s(cfg.duration);
     printf("Running %s test @ %s\n", time, url);
     printf("  %"PRIu64" threads and %"PRIu64" connections\n", cfg.threads, cfg.connections);
+    printf("Delay (think time) is %dms\n", cfg.delay_ms);
 
     uint64_t start    = time_us();
     uint64_t complete = 0;
@@ -434,6 +439,13 @@ static int response_body(http_parser *parser, const char *at, size_t len) {
     return 0;
 }
 
+static int after_delay(aeEventLoop *loop, long long id, void *data) {
+    aeDeleteTimeEvent(loop, id);
+
+    connection* c = data;
+    aeCreateFileEvent(c->thread->loop, c->fd, AE_WRITABLE, socket_writeable, c);
+}
+
 static int response_complete(http_parser *parser) {
     connection *c = parser->data;
     thread *thread = c->thread;
@@ -464,7 +476,12 @@ static int response_complete(http_parser *parser) {
         hdr_record_value(thread->latency_histogram, latency_timing);
         hdr_record_corrected_value(thread->corrected_histogram, latency_timing, thread->mean);
         c->has_pending = false;
-        aeCreateFileEvent(thread->loop, c->fd, AE_WRITABLE, socket_writeable, c);
+        if (0 == cfg.delay_ms) {
+            aeCreateFileEvent(thread->loop, c->fd, AE_WRITABLE, socket_writeable, c);
+        } else {
+            //     aeCreateTimeEvent(loop, CALIBRATE_DELAY_MS, calibrate, thread, NULL);
+            aeCreateTimeEvent(thread->loop, cfg.delay_ms, after_delay, c, NULL);
+        }
     }
 
     if (!http_should_keep_alive(parser)) {
@@ -593,6 +610,7 @@ static struct option longopts[] = {
     { "timeout",     required_argument, NULL, 'T' },
     { "help",        no_argument,       NULL, 'h' },
     { "version",     no_argument,       NULL, 'v' },
+    { "delay",       required_argument, NULL, 'D' },
     { NULL,          0,                 NULL,  0  }
 };
 
@@ -604,8 +622,9 @@ static int parse_args(struct config *cfg, char **url, char **headers, int argc, 
     cfg->connections = 10;
     cfg->duration    = 10;
     cfg->timeout     = SOCKET_TIMEOUT_MS;
+    cfg->delay_ms    = 0;
 
-    while ((c = getopt_long(argc, argv, "t:c:d:s:H:T:Lrv?", longopts, NULL)) != -1) {
+    while ((c = getopt_long(argc, argv, "t:c:d:s:H:T:D:Lrv?", longopts, NULL)) != -1) {
         switch (c) {
             case 't':
                 if (scan_metric(optarg, &cfg->threads)) return -1;
@@ -628,6 +647,9 @@ static int parse_args(struct config *cfg, char **url, char **headers, int argc, 
             case 'T':
                 if (scan_time(optarg, &cfg->timeout)) return -1;
                 cfg->timeout *= 1000;
+                break;
+            case 'D':
+                if (scan_time(optarg, &cfg->delay_ms)) return -1;
                 break;
             case 'v':
                 printf("wrk %s [%s] ", VERSION, aeGetApiName());
