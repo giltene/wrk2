@@ -184,7 +184,7 @@ int main(int argc, char **argv) {
     char *time = format_time_s(cfg.duration);
     printf("Running %s test @ %s\n", time, url);
     printf("  %"PRIu64" threads and %"PRIu64" connections\n", cfg.threads, cfg.connections);
-    printf("Delay (think time) is %dms\n", cfg.delay_ms);
+    printf("Delay (think time) is %llums\n", cfg.delay_ms);
 
     uint64_t start    = time_us();
     uint64_t complete = 0;
@@ -227,9 +227,9 @@ int main(int argc, char **argv) {
         }
 
         printf("---\n");
-        print_hdr_latency(sampled_histogram, "As Sampled");
+        print_hdr_latency(sampled_histogram, "As Sampled by original logic (to within 3 decimal points)");
         printf("---\n");
-        print_hdr_latency(statistics.latency_histogram, "Measured");
+        print_hdr_latency(statistics.latency_histogram, "Measured (uncorrected)");
         printf("---\n");
         print_hdr_latency(statistics.corrected_histogram, "Corrected");
         printf("---\n");
@@ -351,8 +351,9 @@ static int calibrate(aeEventLoop *loop, long long id, void *data) {
     (void) stats_summarize(thread->latency);
     long double mean = stats_mean(thread->latency);
     long double latency = stats_percentile(thread->latency, 90.0) / 1000.0L;
-    long double interval = MAX(latency * 2, 10);
-    long double rate = (interval / latency) * thread->connections;
+    long double time_between_requests = cfg.delay_ms + latency;
+    long double interval = MAX(time_between_requests * 2, 10);
+    long double rate = (interval / time_between_requests) * thread->connections;
 
     if (latency == 0) return CALIBRATE_DELAY_MS;
 
@@ -365,7 +366,8 @@ static int calibrate(aeEventLoop *loop, long long id, void *data) {
     hdr_reset(thread->latency_histogram);
     hdr_reset(thread->corrected_histogram);
 
-    printf("Interval: %d, mean: %lld, latency: %Lf\n", thread->interval, thread->mean, latency);
+    printf("Interval: %d, mean: %lld, latency: %Lf, time_between_requests: %Lf\n", 
+        thread->interval, thread->mean, latency, time_between_requests);
 
     aeCreateTimeEvent(loop, thread->interval, sample_rate, thread, NULL);
 
@@ -440,10 +442,10 @@ static int response_body(http_parser *parser, const char *at, size_t len) {
 }
 
 static int after_delay(aeEventLoop *loop, long long id, void *data) {
-    aeDeleteTimeEvent(loop, id);
-
     connection* c = data;
     aeCreateFileEvent(c->thread->loop, c->fd, AE_WRITABLE, socket_writeable, c);
+
+    return AE_NOMORE;
 }
 
 static int response_complete(http_parser *parser) {
@@ -707,7 +709,7 @@ static void print_stats(char *name, stats *stats, char *(*fmt)(long double)) {
 
 static void print_hdr_latency(struct hdr_histogram* histogram, const char* description) {
     long double percentiles[] = { 50.0, 75.0, 90.0, 99.0 };
-    printf("  Latency Distribution (HDR - %s)\n", description);
+    printf("  Latency Distribution (HdrHistogram - %s)\n", description);
     for (size_t i = 0; i < sizeof(percentiles) / sizeof(long double); i++) {
         long double p = percentiles[i];
         int64_t n = hdr_value_at_percentile(histogram, p);
