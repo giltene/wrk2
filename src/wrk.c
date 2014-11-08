@@ -476,7 +476,7 @@ static int response_complete(http_parser *parser) {
         stats_record(thread->latency, now - c->start);
         uint64_t latency_timing = now - c->latency_start;
         hdr_record_value(thread->latency_histogram, latency_timing);
-        hdr_record_corrected_value(thread->corrected_histogram, latency_timing, thread->mean);
+        hdr_record_corrected_value(thread->corrected_histogram, latency_timing, thread->mean + cfg.delay_ms);
         c->has_pending = false;
         if (0 == cfg.delay_ms) {
             aeCreateFileEvent(thread->loop, c->fd, AE_WRITABLE, socket_writeable, c);
