@@ -25,7 +25,10 @@ wrk2 - a HTTP benchmarking tool based mostly on wrk
   merged into wrk in the future if others see fit to adopt it's changes.
 
   The remaining part of the README is wrk's, with minor changes to
-  reflect additional parameter and output.
+  reflect additional parameter and output. There is an imprtant and
+  detailed note at the end about about wrk2's latency measurement
+  technique, including a discussion of Coordinated Omission, how
+  wrk2 avoids it, and detailed output that demonstrates it.
 
   wrk2 (as is wrk) is a modern HTTP benchmarking tool capable of generating significant
   load when run on a single multi-core CPU. It combines a multithreaded
