@@ -7,6 +7,19 @@ wrk2 - a HTTP benchmarking tool based mostly on wrk
   per second) via either the --thoughput or -R parameters (default
   is 1000).
 
+  CRITICAL NOTE: Before going farther, I'd like to make it clear that
+  this work is in no way intended to be an attack on or a disparagement
+  of the great work that Will Glozer has done with wrk. I enjoyed working
+  with his code, and I sincerely hope that some of the changes I had made
+  might be considered for inclusion back into wrk. As those of you who may
+  be familiar with my latency related talks and rants, the latency
+  measurement issues that I focused on fixing with wrk2 are extremely
+  commonly in load generators and in monitoring code. I do not
+  ascribe any lack or skill or intelligence to people who's creations
+  repeat them. I was once (as recently as 2-3 years ago) just as
+  oblivious to the effects of Coordinated Omission as the rest of
+  the world still is.
+
   wrk2 replaces wrk's individual request sample buffers with
   HdrHistograms. wrk2 maintains wrk's Lua API, including it's
   presentation of the stats objects (latency and requests). The stats
@@ -257,8 +270,10 @@ Acknowledgements
   wrk2 is obviously based on wrk, and credit goes to wrk's authors for
   pretty much everything.
 
-  wrk2 uses HdrHistogram. Specifically the C port written by Mike Barker.
-  Details can be found at http://hdrhistogram.org
+  wrk2 uses my (Gil Tene's) HdrHistogram. Specifically, the C port written
+  by Mike Barker. Details can be found at http://hdrhistogram.org . Mike
+  also started the work on this wrk modification, but as he was stuck
+  on a plane ride to New Zealand, I picked it up and ran it to completion.
 
   wrk contains code from a number of open source projects including the
   'ae' event loop from redis, the nginx/joyent/node.js 'http-parser',
