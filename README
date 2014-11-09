@@ -4,7 +4,7 @@ wrk2 - a HTTP benchmarking tool based mostly on wrk
   accurate latency details to the high 9s (i.e. can produce
   accurate 99.9999%'ile when run long enough). In addition to
   wrk's arguments, wrk2 takes a throughput argument (in total requests
-  per second) via either the --thoughput or -R parameters (default
+  per second) via either the --rate or -R parameters (default
   is 1000).
 
   CRITICAL NOTE: Before going farther, I'd like to make it clear that
@@ -53,7 +53,7 @@ wrk2 - a HTTP benchmarking tool based mostly on wrk
 
 Basic Usage
 
-  wrk2 -t2 -c100 -d30s -R2000 http://127.0.0.1:8080/index.html
+  wrk -t2 -c100 -d30s -R2000 http://127.0.0.1:8080/index.html
 
   This runs a benchmark for 30 seconds, using 2 threads, and keeping
   100 HTTP connections open, and a constant throughput of 2000 requests

@@ -56,13 +56,13 @@ static void usage() {
            "                                                      \n"
            "    -s, --script      <S>  Load Lua script file       \n"
            "    -H, --header      <H>  Add header to request      \n"
-            "        --latency          Print latency statistics   \n"
-            "        --u_latency        Print uncorrceted latency statistics\n"
+           "    -L  --latency          Print latency statistics   \n"
+           "    -U  --u_latency        Print uncorrceted latency statistics\n"
            "        --timeout     <T>  Socket/request timeout     \n"
            "    -v, --version          Print version details      \n"
-           "        --rate        <T>  work rate (throughput)     \n"
+           "    -R, --rate        <T>  work rate (throughput)     \n"
            "                           in requests/sec (total)    \n"
-           "                           default = 1000             \n"
+           "                           [Required Parameter]       \n"
            "                                                      \n"
            "                                                      \n"
            "  Numeric arguments may include a SI unit (1k, 1M, 1G)\n"
@@ -730,9 +730,9 @@ static int parse_args(struct config *cfg, char **url, char **headers, int argc, 
     cfg->connections = 10;
     cfg->duration    = 10;
     cfg->timeout     = SOCKET_TIMEOUT_MS;
-    cfg->rate        = 1000;
+    cfg->rate        = 0;
 
-    while ((c = getopt_long(argc, argv, "t:c:d:s:H:T:R:Lrv?", longopts, NULL)) != -1) {
+    while ((c = getopt_long(argc, argv, "t:c:d:s:H:T:R:LUrv?", longopts, NULL)) != -1) {
         switch (c) {
             case 't':
                 if (scan_metric(optarg, &cfg->threads)) return -1;
@@ -779,6 +779,12 @@ static int parse_args(struct config *cfg, char **url, char **headers, int argc, 
 
     if (!cfg->connections || cfg->connections < cfg->threads) {
         fprintf(stderr, "number of connections must be >= threads\n");
+        return -1;
+    }
+
+    if (cfg->rate == 0) {
+        fprintf(stderr,
+                "Throughput MUST be specified with the --rate or -R option\n");
         return -1;
     }
 
