@@ -1,6 +1,6 @@
 wrk2 - a HTTP benchmarking tool based mostly on wrk
 
-  wrk2 is wrk modifed to produced a constant throughput load, and
+  wrk2 is wrk modifed to produce a constant throughput load, and
   accurate latency details to the high 9s (i.e. can produce
   accurate 99.9999%'ile when run long enough). In addition to
   wrk's arguments, wrk2 takes a throughput argument (in total requests
@@ -14,8 +14,8 @@ wrk2 - a HTTP benchmarking tool based mostly on wrk
   might be considered for inclusion back into wrk. As those of you who may
   be familiar with my latency related talks and rants, the latency
   measurement issues that I focused on fixing with wrk2 are extremely
-  commonly in load generators and in monitoring code. I do not
-  ascribe any lack or skill or intelligence to people who's creations
+  common in load generators and in monitoring code. I do not
+  ascribe any lack of skill or intelligence to people who's creations
   repeat them. I was once (as recently as 2-3 years ago) just as
   oblivious to the effects of Coordinated Omission as the rest of
   the world still is.
@@ -32,20 +32,21 @@ wrk2 - a HTTP benchmarking tool based mostly on wrk
   response latency (from the point in time where a request was supposed
   to be sent per the "plan" to the time that it actually arrived), wrk2's
   latency reporting is significantly more accurate (as in "correct") than
-  that of wrk's current (Nov. 2014) execution model supports.
+  that of wrk's current (Nov. 2014) execution model.
 
   wrk2 is currently in experimental/development mode, and may well be
   merged into wrk in the future if others see fit to adopt it's changes.
 
   The remaining part of the README is wrk's, with minor changes to
-  reflect additional parameter and output. There is an imprtant and
+  reflect additional parameter and output. There is an important and
   detailed note at the end about about wrk2's latency measurement
   technique, including a discussion of Coordinated Omission, how
   wrk2 avoids it, and detailed output that demonstrates it.
 
-  wrk2 (as is wrk) is a modern HTTP benchmarking tool capable of generating significant
-  load when run on a single multi-core CPU. It combines a multithreaded
-  design with scalable event notification systems such as epoll and kqueue.
+  wrk2 (as is wrk) is a modern HTTP benchmarking tool capable of generating
+  significant load when run on a single multi-core CPU. It combines a
+  multithreaded design with scalable event notification systems such as
+  epoll and kqueue.
 
   An optional LuaJIT script can perform HTTP request generation, response
   processing, and custom reporting. Several example scripts are located in
@@ -55,12 +56,12 @@ Basic Usage
 
   wrk -t2 -c100 -d30s -R2000 http://127.0.0.1:8080/index.html
 
-  This runs a benchmark for 30 seconds, using 2 threads, and keeping
+  This runs a benchmark for 30 seconds, using 2 threads, keeping
   100 HTTP connections open, and a constant throughput of 2000 requests
   per second (total, across all connections combined).
 
-  [It's important to note that wrk2 extends the calibration period
-   to 10 seconds (from wrk's 0.5 second), so runs shorter than
+  [It's important to note that wrk2 extends the initial calibration
+   period to 10 seconds (from wrk's 0.5 second), so runs shorter than
    10-20 seconds may not present useful information]
 
   Output:
@@ -284,7 +285,7 @@ Acknowledgements
 
 A note about wrk2's latency measurement technique:
 
-  One of wrk's main modification to wrk's current (Nov. 2014) measurement
+  One of wrk2's main modification to wrk's current (Nov. 2014) measurement
   model has to do with how request latency is computed and recorded.
 
   wrk's model, which is similar to the model found in many current load
@@ -306,14 +307,14 @@ A note about wrk2's latency measurement technique:
   expected interval between measurements exists. Alternatively, some
   completely asynchronous load generators can avoid Coordinated
   Omission by sending requests without waiting for previous responses
-  to arrive. However, this technique is only effective with non-blocking
-  protocols or single-request-per-connection workloads. When the
-  application being measured involves multiple requests serial
-  requests being sent within each connection blocking protocol
-  (as is the case with most TCP and HTTP workloads), this completely
-  asynchronous behavior is usually not a viable option.
+  to arrive. However, this (asynchronous) technique is normally only
+  effective with non-blocking protocols or single-request-per-connection
+  workloads. When the application being measured may involve mutiple
+  serial request/response interactions within each connection, or a
+  blocking protocol (as is the case with most TCP and HTTP workloads),
+  this completely asynchronous behavior is usually not a viable option.
 
-  The model the wrk2 chooses to avoid Coordinated Omission is to combine
+  The model I chose for avoiding Coordinated Omission in wrk2 combines
   the use of constant throughput load generation with latency
   measurement that takes the intended constant throughout into account.
   Rather than measure response latency from the time that the actual
@@ -324,8 +325,16 @@ A note about wrk2's latency measurement technique:
   the true latency of the subsequent requests will be appropriately
   reflected in teh recorded latency stats.
 
+  Note: This technique can be applied to variable throughout loaders.
+        It requires a "model" or "plan" that can provide the intended
+        start time if each request. Constant throughout load generators
+        Make this trivial to model. More complicated schemes (such as
+        varying throughout or stochastic arrival models) would likely
+        require a detailed model and some memory to provide this
+        information.
+
   In order to demonstrate the significant difference between the two
-  latency recording techniques, wrk2 tracks an internal "uncorrected
+  latency recording techniques, wrk2 also tracks an internal "uncorrected
   latency histogram" that can be reported on using the --u_latency flag.
   For example, the output below demonstrates the difference in recorded
   latency distribution for two runs:
