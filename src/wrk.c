@@ -3,6 +3,7 @@
 #include "wrk.h"
 #include "main.h"
 #include "hdr_histogram.h"
+#include "stats.h"
 
 // Max recordable latency of 1 day
 #define MAX_LATENCY 24L * 60 * 60 * 1000000
@@ -14,18 +15,17 @@ static struct config {
     uint64_t duration;
     uint64_t timeout;
     uint64_t pipeline;
+    uint64_t rate;
     uint64_t delay_ms;
     bool     latency;
+    bool     u_latency;
     bool     dynamic;
     char    *script;
     SSL_CTX *ctx;
 } cfg;
 
 static struct {
-    stats *latency;
     stats *requests;
-    struct hdr_histogram *latency_histogram;
-    struct hdr_histogram *corrected_histogram;
     pthread_mutex_t mutex;
 } statistics;
 
@@ -56,11 +56,13 @@ static void usage() {
            "                                                      \n"
            "    -s, --script      <S>  Load Lua script file       \n"
            "    -H, --header      <H>  Add header to request      \n"
-           "        --latency          Print latency statistics   \n"
+            "        --latency          Print latency statistics   \n"
+            "        --u_latency        Print uncorrceted latency statistics\n"
            "        --timeout     <T>  Socket/request timeout     \n"
            "    -v, --version          Print version details      \n"
-           "        --delay       <T>  Think time (ms) between    \n"
-           "                           each request, default = 0  \n"
+           "        --rate        <T>  work rate (throughput)     \n"
+           "                           in requests/sec (total)    \n"
+           "                           default = 1000             \n"
            "                                                      \n"
            "                                                      \n"
            "  Numeric arguments may include a SI unit (1k, 1M, 1G)\n"
@@ -138,19 +140,19 @@ int main(int argc, char **argv) {
     cfg.addr = *addr;
 
     pthread_mutex_init(&statistics.mutex, NULL);
-    statistics.latency  = stats_alloc(SAMPLES);
-    statistics.requests = stats_alloc(SAMPLES);
-    hdr_init(1, MAX_LATENCY, 3, &statistics.latency_histogram);
-    hdr_init(1, MAX_LATENCY, 3, &statistics.corrected_histogram);
+    statistics.requests = stats_alloc(10);
+    hdr_init(1, MAX_LATENCY, 3, &(statistics.requests->histogram));
 
     thread *threads = zcalloc(cfg.threads * sizeof(thread));
     uint64_t connections = cfg.connections / cfg.threads;
+    uint64_t throughput = cfg.rate / cfg.threads;
     uint64_t stop_at     = time_us() + (cfg.duration * 1000000);
 
     for (uint64_t i = 0; i < cfg.threads; i++) {
         thread *t = &threads[i];
         t->loop        = aeCreateEventLoop(10 + cfg.connections * 3);
         t->connections = connections;
+        t->throughput = throughput;;
         t->stop_at     = stop_at;
 
         t->L = script_create(schema, host, port, path);
@@ -183,18 +185,28 @@ int main(int argc, char **argv) {
 
     char *time = format_time_s(cfg.duration);
     printf("Running %s test @ %s\n", time, url);
-    printf("  %"PRIu64" threads and %"PRIu64" connections\n", cfg.threads, cfg.connections);
-    printf("Delay (think time) is %llums\n", cfg.delay_ms);
+    printf("  %"PRIu64" threads and %"PRIu64" connections\n",
+            cfg.threads, cfg.connections);
 
     uint64_t start    = time_us();
     uint64_t complete = 0;
     uint64_t bytes    = 0;
     errors errors     = { 0 };
 
+    struct hdr_histogram* latency_histogram;
+    hdr_init(1, MAX_LATENCY, 3, &latency_histogram);
+    struct hdr_histogram* u_latency_histogram;
+    hdr_init(1, MAX_LATENCY, 3, &u_latency_histogram);
+
     for (uint64_t i = 0; i < cfg.threads; i++) {
         thread *t = &threads[i];
         pthread_join(t->thread, NULL);
+    }
 
+    uint64_t runtime_us = time_us() - start;
+
+    for (uint64_t i = 0; i < cfg.threads; i++) {
+        thread *t = &threads[i];
         complete += t->complete;
         bytes    += t->bytes;
 
@@ -204,40 +216,41 @@ int main(int argc, char **argv) {
         errors.timeout += t->errors.timeout;
         errors.status  += t->errors.status;
 
-        hdr_add(statistics.latency_histogram, t->latency_histogram);
-        hdr_add(statistics.corrected_histogram, t->corrected_histogram);
+        hdr_add(latency_histogram, t->latency_histogram);
+        hdr_add(u_latency_histogram, t->u_latency_histogram);
     }
 
-    uint64_t runtime_us = time_us() - start;
     long double runtime_s   = runtime_us / 1000000.0;
     long double req_per_s   = complete   / runtime_s;
     long double bytes_per_s = bytes      / runtime_s;
 
+    stats *latency_stats = stats_alloc(10);
+    latency_stats->min = hdr_min(latency_histogram);
+    latency_stats->max = hdr_max(latency_histogram);
+    latency_stats->histogram = latency_histogram;
+
     print_stats_header();
-    print_stats("Latency", statistics.latency, format_time_us);
+    print_stats("Latency", latency_stats, format_time_us);
     print_stats("Req/Sec", statistics.requests, format_metric);
+//    if (cfg.latency) print_stats_latency(latency_stats);
+
     if (cfg.latency) {
-        print_stats_latency(statistics.latency);
+        print_hdr_latency(latency_histogram,
+                "Recorded Latency");
+        printf("----------------------------------------------------------\n");
+    }
 
-        struct hdr_histogram* sampled_histogram;
-        hdr_init(1, MAX_LATENCY, 3, &sampled_histogram);
-
-        for (int i = 0; i < statistics.latency->limit; i++) {
-            hdr_record_value(sampled_histogram, statistics.latency->data[i]);
-        }
-
-        printf("---\n");
-        print_hdr_latency(sampled_histogram, "As Sampled by original logic (to within 3 decimal points)");
-        printf("---\n");
-        print_hdr_latency(statistics.latency_histogram, "Measured (uncorrected)");
-        printf("---\n");
-        print_hdr_latency(statistics.corrected_histogram, "Corrected");
-        printf("---\n");
+    if (cfg.u_latency) {
+        printf("\n");
+        print_hdr_latency(u_latency_histogram,
+                "Uncorrected Latency (measured without taking delayed starts into account)");
+        printf("----------------------------------------------------------\n");
     }
 
     char *runtime_msg = format_time_us(runtime_us);
 
-    printf("  %"PRIu64" requests in %s, %sB read\n", complete, runtime_msg, format_binary(bytes));
+    printf("  %"PRIu64" requests in %s, %sB read\n",
+            complete, runtime_msg, format_binary(bytes));
     if (errors.connect || errors.read || errors.write || errors.timeout) {
         printf("  Socket errors: connect %d, read %d, write %d, timeout %d\n",
                errors.connect, errors.read, errors.write, errors.timeout);
@@ -254,7 +267,7 @@ int main(int argc, char **argv) {
     if (script_has_done(L)) {
         script_summary(L, runtime_us, complete, bytes);
         script_errors(L, &errors);
-        script_done(L, statistics.latency, statistics.requests);
+        script_done(L, latency_stats, statistics.requests);
     }
 
     return 0;
@@ -266,9 +279,8 @@ void *thread_main(void *arg) {
 
     thread->cs = zcalloc(thread->connections * sizeof(connection));
     tinymt64_init(&thread->rand, time_us());
-    thread->latency = stats_alloc(100000);
     hdr_init(1, MAX_LATENCY, 3, &thread->latency_histogram);
-    hdr_init(1, MAX_LATENCY, 3, &thread->corrected_histogram);
+    hdr_init(1, MAX_LATENCY, 3, &thread->u_latency_histogram);
 
     char *request = NULL;
     size_t length = 0;
@@ -277,33 +289,37 @@ void *thread_main(void *arg) {
         script_request(thread->L, &request, &length);
     }
 
+    double throughput = (thread->throughput / 1000000.0) / thread->connections;
+
+    uint64_t connections_start = time_us();
+
     connection *c = thread->cs;
 
     for (uint64_t i = 0; i < thread->connections; i++, c++) {
-        c->thread = thread;
-        c->ssl     = cfg.ctx ? SSL_new(cfg.ctx) : NULL;
-        c->request = request;
-        c->length  = length;
-        connect_socket(thread, c);
+        c->thread     = thread;
+        c->ssl        = cfg.ctx ? SSL_new(cfg.ctx) : NULL;
+        c->request    = request;
+        c->length     = length;
+        c->throughput = throughput;
+        c->catch_up_throughput = throughput * 2;
+        c->complete   = 0;
+        c->caught_up  = true;
+        c->thread_start = connections_start;
+        // Stagger connects 5 msec apart within thread:
+        aeCreateTimeEvent(loop, i * 5, delayed_connect, c, NULL);
     }
 
-    aeCreateTimeEvent(loop, CALIBRATE_DELAY_MS, calibrate, thread, NULL);
-    aeCreateTimeEvent(loop, TIMEOUT_INTERVAL_MS, check_timeouts, thread, NULL);
+    uint64_t calibrate_delay = CALIBRATE_DELAY_MS + (thread->connections * 5);
+    uint64_t timeout_delay = TIMEOUT_INTERVAL_MS + (thread->connections * 5);
+
+    aeCreateTimeEvent(loop, calibrate_delay, calibrate, thread, NULL);
+    aeCreateTimeEvent(loop, timeout_delay, check_timeouts, thread, NULL);
 
     thread->start = time_us();
     aeMain(loop);
 
     aeDeleteEventLoop(loop);
     zfree(thread->cs);
-
-    uint64_t max = thread->latency->max;
-    stats_free(thread->latency);
-
-    pthread_mutex_lock(&statistics.mutex);
-    for (uint64_t i = 0; i < thread->missed; i++) {
-        stats_record(statistics.latency, max);
-    }
-    pthread_mutex_unlock(&statistics.mutex);
 
     return NULL;
 }
@@ -325,6 +341,8 @@ static int connect_socket(thread *thread, connection *c) {
     flags = 1;
     setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &flags, sizeof(flags));
 
+    c->latest_connect = time_us();
+
     flags = AE_READABLE | AE_WRITABLE;
     if (aeCreateFileEvent(loop, fd, flags, socket_connected, c) == AE_OK) {
         c->parser.data = c;
@@ -345,29 +363,33 @@ static int reconnect_socket(thread *thread, connection *c) {
     return connect_socket(thread, c);
 }
 
+static int delayed_connect(aeEventLoop *loop, long long id, void *data) {
+    connection* c = data;
+    connect_socket(c->thread, c);
+    return AE_NOMORE;
+}
+
 static int calibrate(aeEventLoop *loop, long long id, void *data) {
     thread *thread = data;
 
-    (void) stats_summarize(thread->latency);
-    long double mean = stats_mean(thread->latency);
-    long double latency = stats_percentile(thread->latency, 90.0) / 1000.0L;
-    long double time_between_requests = cfg.delay_ms + latency;
-    long double interval = MAX(time_between_requests * 2, 10);
-    long double rate = (interval / time_between_requests) * thread->connections;
+    long double mean = hdr_mean(thread->latency_histogram);
+    long double latency = hdr_value_at_percentile(
+            thread->latency_histogram, 90.0) / 1000.0L;
+    long double interval = MAX(latency * 2, 10);
 
-    if (latency == 0) return CALIBRATE_DELAY_MS;
+    if (mean == 0) return CALIBRATE_DELAY_MS;
 
-    thread->interval = interval;
-    thread->rate     = ceil(rate / 10);
-    thread->start    = time_us();
-    thread->requests = 0;
     thread->mean     = (uint64_t) mean;
-    stats_reset(thread->latency);
     hdr_reset(thread->latency_histogram);
-    hdr_reset(thread->corrected_histogram);
+    hdr_reset(thread->u_latency_histogram);
 
-    printf("Interval: %d, mean: %lld, latency: %Lf, time_between_requests: %Lf\n", 
-        thread->interval, thread->mean, latency, time_between_requests);
+    thread->start    = time_us();
+    thread->interval = interval;
+    thread->requests = 0;
+
+    printf("  Thread calibration: mean lat.: %lld usec, rate sampling interval: %d msec\n",
+            thread->mean,
+            thread->interval);
 
     aeCreateTimeEvent(loop, thread->interval, sample_rate, thread, NULL);
 
@@ -399,18 +421,13 @@ static int sample_rate(aeEventLoop *loop, long long id, void *data) {
 
     uint64_t elapsed_ms = (time_us() - thread->start) / 1000;
     uint64_t requests = (thread->requests / (double) elapsed_ms) * 1000;
-    uint64_t missed = thread->rate - MIN(thread->rate, thread->latency->limit);
-    uint64_t count = thread->rate - missed;
 
     pthread_mutex_lock(&statistics.mutex);
-    stats_sample(statistics.latency, &thread->rand, count, thread->latency);
     stats_record(statistics.requests, requests);
     pthread_mutex_unlock(&statistics.mutex);
 
-    thread->missed  += missed;
     thread->requests = 0;
     thread->start    = time_us();
-    stats_rewind(thread->latency);
 
     return thread->interval;
 }
@@ -441,10 +458,54 @@ static int response_body(http_parser *parser, const char *at, size_t len) {
     return 0;
 }
 
-static int after_delay(aeEventLoop *loop, long long id, void *data) {
-    connection* c = data;
-    aeCreateFileEvent(c->thread->loop, c->fd, AE_WRITABLE, socket_writeable, c);
+static uint64_t usec_to_next_send(connection *c) {
+    uint64_t now = time_us();
 
+    uint64_t next_start_time = c->thread_start + (c->complete / c->throughput);
+
+    bool send_now = true;
+
+    if (next_start_time > now) {
+        // We are on pace. Indicate caught_up and don't send now.
+        c->caught_up = true;
+        send_now = false;
+    } else {
+        // We are behind
+        if (c->caught_up) {
+            // This is the first fall-behind since we were last caught up
+            c->caught_up = false;
+            c->catch_up_start_time = now;
+            c->complete_at_catch_up_start = c->complete;
+        }
+
+        // Figure out if it's time to send, per catch up throughput:
+        uint64_t complete_since_catch_up_start =
+                c->complete - c->complete_at_catch_up_start;
+
+        next_start_time = c->catch_up_start_time +
+                (complete_since_catch_up_start / c->catch_up_throughput);
+
+        if (next_start_time > now) {
+            // Not yet time to send, even at catch-up throughout:
+            send_now = false;
+        }
+    }
+
+    if (send_now) {
+        c->latest_should_send_time = now;
+        c->latest_expected_start = next_start_time;
+    }
+
+    return send_now ? 0 : (next_start_time - now);
+}
+
+static int delay_request(aeEventLoop *loop, long long id, void *data) {
+    connection* c = data;
+    uint64_t time_usec_to_wait = usec_to_next_send(c);
+    if (time_usec_to_wait) {
+        return round((time_usec_to_wait / 1000.0L) + 0.5); /* don't send, wait */
+    }
+    aeCreateFileEvent(c->thread->loop, c->fd, AE_WRITABLE, socket_writeable, c);
     return AE_NOMORE;
 }
 
@@ -473,17 +534,43 @@ static int response_complete(http_parser *parser) {
     }
 
     if (--c->pending == 0) {
-        stats_record(thread->latency, now - c->start);
-        uint64_t latency_timing = now - c->latency_start;
-        hdr_record_value(thread->latency_histogram, latency_timing);
-        hdr_record_corrected_value(thread->corrected_histogram, latency_timing, thread->mean + cfg.delay_ms);
         c->has_pending = false;
-        if (0 == cfg.delay_ms) {
-            aeCreateFileEvent(thread->loop, c->fd, AE_WRITABLE, socket_writeable, c);
-        } else {
-            //     aeCreateTimeEvent(loop, CALIBRATE_DELAY_MS, calibrate, thread, NULL);
-            aeCreateTimeEvent(thread->loop, cfg.delay_ms, after_delay, c, NULL);
+
+        uint64_t expected_latency_start = c->thread_start +
+                (c->complete / c->throughput);
+
+        int64_t expected_latency_timing = now - expected_latency_start;
+
+        if (expected_latency_timing < 0) {
+            printf("\n\n ---------- \n\n");
+            printf("response_complete:\n");
+            printf("  expected_latency_timing = %lld\n", expected_latency_timing);
+            printf("  now = %lld\n", now);
+            printf("  expected_latency_start = %lld\n", expected_latency_start);
+            printf("  c->thread_start = %lld\n", c->thread_start);
+            printf("  complete = %lld\n", c->complete);
+            printf("  throughput = %g\n", c->throughput);
+            printf("  latest_should_send_time = %lld\n", c->latest_should_send_time);
+            printf("  latest_expected_start = %lld\n", c->latest_expected_start);
+            printf("  latest_connect = %lld\n", c->latest_connect);
+            printf("  latest_write = %lld\n", c->latest_write);
+
+            expected_latency_start = c->thread_start +
+                    ((c->complete + 1) / c->throughput);
+            printf("  next expected_latency_start = %lld\n", expected_latency_start);
         }
+
+        c->latest_should_send_time = 0;
+        c->latest_expected_start = 0;
+
+        c->complete++;
+
+        hdr_record_value(thread->latency_histogram, expected_latency_timing);
+
+        uint64_t latency_timing = now - c->latency_start;
+        hdr_record_value(thread->u_latency_histogram, latency_timing);
+
+        aeCreateFileEvent(thread->loop, c->fd, AE_WRITABLE, socket_writeable, c);
     }
 
     if (!http_should_keep_alive(parser)) {
@@ -510,7 +597,8 @@ static void socket_connected(aeEventLoop *loop, int fd, void *data, int mask) {
     c->written = 0;
 
     aeCreateFileEvent(c->thread->loop, fd, AE_READABLE, socket_readable, c);
-    aeCreateFileEvent(c->thread->loop, fd, AE_WRITABLE, socket_writeable, c);
+
+    aeCreateFileEvent(c->thread->loop, c->fd, AE_WRITABLE, socket_writeable, c);
 
     return;
 
@@ -523,6 +611,20 @@ static void socket_connected(aeEventLoop *loop, int fd, void *data, int mask) {
 static void socket_writeable(aeEventLoop *loop, int fd, void *data, int mask) {
     connection *c = data;
     thread *thread = c->thread;
+
+    if (!c->written) {
+        uint64_t time_usec_to_wait = usec_to_next_send(c);
+        if (time_usec_to_wait) {
+            int msec_to_wait = round((time_usec_to_wait / 1000.0L) + 0.5);
+
+            // Not yet time to send. Delay:
+            aeDeleteFileEvent(loop, fd, AE_WRITABLE);
+            aeCreateTimeEvent(
+                    thread->loop, msec_to_wait, delay_request, c, NULL);
+            return;
+        }
+        c->latest_write = time_us();
+    }
 
     if (!c->written && cfg.dynamic) {
         script_request(thread->L, &c->request, &c->length);
@@ -609,10 +711,11 @@ static struct option longopts[] = {
     { "script",      required_argument, NULL, 's' },
     { "header",      required_argument, NULL, 'H' },
     { "latency",     no_argument,       NULL, 'L' },
+    { "u_latency",   no_argument,       NULL, 'U' },
     { "timeout",     required_argument, NULL, 'T' },
     { "help",        no_argument,       NULL, 'h' },
     { "version",     no_argument,       NULL, 'v' },
-    { "delay",       required_argument, NULL, 'D' },
+    { "rate",        required_argument, NULL, 'R' },
     { NULL,          0,                 NULL,  0  }
 };
 
@@ -624,9 +727,9 @@ static int parse_args(struct config *cfg, char **url, char **headers, int argc, 
     cfg->connections = 10;
     cfg->duration    = 10;
     cfg->timeout     = SOCKET_TIMEOUT_MS;
-    cfg->delay_ms    = 0;
+    cfg->rate        = 1000;
 
-    while ((c = getopt_long(argc, argv, "t:c:d:s:H:T:D:Lrv?", longopts, NULL)) != -1) {
+    while ((c = getopt_long(argc, argv, "t:c:d:s:H:T:R:Lrv?", longopts, NULL)) != -1) {
         switch (c) {
             case 't':
                 if (scan_metric(optarg, &cfg->threads)) return -1;
@@ -646,12 +749,16 @@ static int parse_args(struct config *cfg, char **url, char **headers, int argc, 
             case 'L':
                 cfg->latency = true;
                 break;
+            case 'U':
+                cfg->latency = true;
+                cfg->u_latency = true;
+                break;
             case 'T':
                 if (scan_time(optarg, &cfg->timeout)) return -1;
                 cfg->timeout *= 1000;
                 break;
-            case 'D':
-                if (scan_time(optarg, &cfg->delay_ms)) return -1;
+            case 'R':
+                if (scan_metric(optarg, &cfg->rate)) return -1;
                 break;
             case 'v':
                 printf("wrk %s [%s] ", VERSION, aeGetApiName());
@@ -708,26 +815,26 @@ static void print_stats(char *name, stats *stats, char *(*fmt)(long double)) {
 }
 
 static void print_hdr_latency(struct hdr_histogram* histogram, const char* description) {
-    long double percentiles[] = { 50.0, 75.0, 90.0, 99.0 };
+    long double percentiles[] = { 50.0, 75.0, 90.0, 99.0, 99.9, 99.99, 99.999, 100.0};
     printf("  Latency Distribution (HdrHistogram - %s)\n", description);
     for (size_t i = 0; i < sizeof(percentiles) / sizeof(long double); i++) {
         long double p = percentiles[i];
         int64_t n = hdr_value_at_percentile(histogram, p);
-        printf("%7.0Lf%%", p);
+        printf("%7.3Lf%%", p);
         print_units(n, format_time_us, 10);
         printf("\n");
     }
-    printf("%s\n", "Histogram");
+    printf("\n%s\n", "  Detailed Percentile spectrum:");
     hdr_percentiles_print(histogram, stdout, 5, 1.0, CLASSIC);
 }
 
 static void print_stats_latency(stats *stats) {
-    long double percentiles[] = { 50.0, 75.0, 90.0, 99.0 };
+    long double percentiles[] = { 50.0, 75.0, 90.0, 99.0, 99.9, 99.99, 99.999, 100.0 };
     printf("  Latency Distribution\n");
     for (size_t i = 0; i < sizeof(percentiles) / sizeof(long double); i++) {
         long double p = percentiles[i];
         uint64_t n = stats_percentile(stats, p);
-        printf("%7.0Lf%%", p);
+        printf("%7.3Lf%%", p);
         print_units(n, format_time_us, 10);
         printf("\n");
     }

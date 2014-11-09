@@ -11,6 +11,7 @@ stats *stats_alloc(uint64_t samples) {
     stats *s = zcalloc(sizeof(stats) + sizeof(uint64_t) * samples);
     s->samples = samples;
     s->min     = UINT64_MAX;
+    s->histogram = NULL;
     return s;
 }
 
@@ -31,9 +32,14 @@ void stats_rewind(stats *stats) {
 }
 
 void stats_record(stats *stats, uint64_t x) {
-    stats->data[stats->index++] = x;
     if (x < stats->min) stats->min = x;
     if (x > stats->max) stats->max = x;
+    if (stats->histogram != NULL) {
+        hdr_record_value(stats->histogram, x);
+        return;
+    }
+
+    stats->data[stats->index++] = x;
     if (stats->limit < stats->samples)  stats->limit++;
     if (stats->index == stats->samples) stats->index = 0;
 }
@@ -50,6 +56,9 @@ long double stats_summarize(stats *stats) {
 }
 
 long double stats_mean(stats *stats) {
+    if (stats->histogram != NULL) {
+        return hdr_mean(stats->histogram);
+    }
     if (stats->limit == 0) return 0.0;
 
     uint64_t sum = 0;
@@ -60,6 +69,9 @@ long double stats_mean(stats *stats) {
 }
 
 long double stats_stdev(stats *stats, long double mean) {
+    if (stats->histogram != NULL) {
+        return hdr_stddev(stats->histogram);
+    }
     long double sum = 0.0;
     if (stats->limit < 2) return 0.0;
     for (uint64_t i = 0; i < stats->limit; i++) {
@@ -71,6 +83,33 @@ long double stats_stdev(stats *stats, long double mean) {
 long double stats_within_stdev(stats *stats, long double mean, long double stdev, uint64_t n) {
     long double upper = mean + (stdev * n);
     long double lower = mean - (stdev * n);
+    if (stats->histogram != NULL) {
+        int64_t total_count = stats->histogram->total_count;
+        if (total_count == 0) {
+            return 0.0;
+        }
+        int64_t upper_value = upper;
+        int64_t lower_value = lower;
+        struct hdr_iter iter;
+        hdr_iter_init(&iter, stats->histogram);
+        int64_t lower_count = 0;
+        int64_t upper_count = 0;
+        bool found_upper = false;
+        while (hdr_iter_next(&iter)) {
+            if (lower_value > iter.value_from_index) {
+                lower_count = iter.count_to_index;
+            }
+            if (upper_value < iter.highest_equivalent_value) {
+                upper_count = iter.count_to_index;
+                found_upper = true;
+                break;
+            }
+        }
+        if (!found_upper) {
+            upper_count = total_count;
+        }
+        return 100.0 * (upper_count - lower_count) / (double) total_count;
+    }
     uint64_t sum = 0;
 
     for (uint64_t i = 0; i < stats->limit; i++) {
@@ -82,6 +121,11 @@ long double stats_within_stdev(stats *stats, long double mean, long double stdev
 }
 
 uint64_t stats_percentile(stats *stats, long double p) {
+    if (stats->histogram != NULL) {
+        double percentile = p;
+        int64_t value = hdr_value_at_percentile(stats->histogram, percentile);
+        return (value < 0) ? 0 : value;
+    }
     uint64_t rank = round((p / 100.0) * stats->limit + 0.5);
     return stats->data[rank - 1];
 }

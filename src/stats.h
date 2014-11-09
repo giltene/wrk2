@@ -1,8 +1,10 @@
 #ifndef STATS_H
 #define STATS_H
 
+#include <stdio.h>
 #include <stdbool.h>
 #include "tinymt64.h"
+#include "hdr_histogram.h"
 
 #define MAX(X, Y) ((X) > (Y) ? (X) : (Y))
 #define MIN(X, Y) ((X) < (Y) ? (X) : (Y))
@@ -21,6 +23,7 @@ typedef struct {
     uint64_t limit;
     uint64_t min;
     uint64_t max;
+    struct hdr_histogram *histogram;
     uint64_t data[];
 } stats;
 

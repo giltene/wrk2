@@ -20,7 +20,7 @@
 #define SAMPLES  100000000
 
 #define SOCKET_TIMEOUT_MS   2000
-#define CALIBRATE_DELAY_MS  2500
+#define CALIBRATE_DELAY_MS  10000
 #define TIMEOUT_INTERVAL_MS 2000
 
 typedef struct {
@@ -33,12 +33,10 @@ typedef struct {
     uint64_t requests;
     uint64_t bytes;
     uint64_t start;
-    uint64_t rate;
-    uint64_t missed;
+    double throughput;
     uint64_t mean;
-    stats *latency;
     struct hdr_histogram *latency_histogram;
-    struct hdr_histogram *corrected_histogram;
+    struct hdr_histogram *u_latency_histogram;
     tinymt64_t rand;
     lua_State *L;
     errors errors;
@@ -53,6 +51,12 @@ typedef struct connection {
     } state;
     int fd;
     SSL *ssl;
+    double throughput;
+    double catch_up_throughput;
+    uint64_t complete;
+    uint64_t catch_up_start_time;
+    uint64_t complete_at_catch_up_start;
+    uint64_t thread_start;
     uint64_t start;
     char *request;
     size_t length;
@@ -63,6 +67,12 @@ typedef struct connection {
     char buf[RECVBUF];
     uint64_t latency_start;
     bool has_pending;
+    bool caught_up;
+    // Internal tracking numbers (used purely for debugging):
+    uint64_t latest_should_send_time;
+    uint64_t latest_expected_start;
+    uint64_t latest_connect;
+    uint64_t latest_write;
 } connection;
 
 #endif /* WRK_H */

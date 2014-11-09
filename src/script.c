@@ -4,6 +4,7 @@
 #include <string.h>
 #include "script.h"
 #include "http_parser.h"
+#include "stats.h"
 
 typedef struct {
     char *name;
@@ -238,7 +239,13 @@ static int script_stats_get(lua_State *L) {
     stats *s = checkstats(L);
     if (lua_isnumber(L, 2)) {
         int index = luaL_checkint(L, 2);
-        lua_pushnumber(L, s->data[index - 1]);
+        if (s->histogram) {
+            double percentile = ((double) index) / s->histogram->total_count;
+            int64_t value = hdr_value_at_percentile(s->histogram, percentile);
+            lua_pushnumber(L, value);
+        } else {
+            lua_pushnumber(L, s->data[index - 1]);
+        }
     } else if (lua_isstring(L, 2)) {
         const char *method = lua_tostring(L, 2);
         if (!strcmp("min",   method)) lua_pushnumber(L, s->min);
@@ -254,7 +261,11 @@ static int script_stats_get(lua_State *L) {
 
 static int script_stats_len(lua_State *L) {
     stats *s = checkstats(L);
-    lua_pushinteger(L, s->limit);
+    if (s->histogram) {
+        lua_pushinteger(L, s->histogram->total_count);
+    } else {
+        lua_pushinteger(L, s->limit);
+    }
     return 1;
 }
 
