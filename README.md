@@ -336,6 +336,11 @@ A note about wrk2's latency measurement technique:
   In order to demonstrate the significant difference between the two
   latency recording techniques, wrk2 also tracks an internal "uncorrected
   latency histogram" that can be reported on using the --u_latency flag.
+  The following chart depicts the differences between the correct and
+  the "uncorrected" percentile distributions measured during wrk2 runs.
+  
+  ![CO example]
+  
   For example, the output below demonstrates the difference in recorded
   latency distribution for two runs:
 
@@ -709,3 +714,5 @@ Example 2: [1.4 second ^Z artifact introduced on the httpd server]:
       60055 requests in 30.01s, 19.83MB read
     Requests/sec:   2001.42
     Transfer/sec:    676.57KB
+
+[CO example]:https://raw.github.com/giltene/wrk2/master/CoordinatedOmission/wrk2_CleanVsCO.png "Coordinated Omission example"
