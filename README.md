@@ -338,6 +338,8 @@ A note about wrk2's latency measurement technique:
   latency histogram" that can be reported on using the --u_latency flag.
   The following chart depicts the differences between the correct and
   the "uncorrected" percentile distributions measured during wrk2 runs.
+  (The "uncorrected" distributions are labeled with "CO", for Coordinated
+  Omission)
   
   ![CO example]
   
