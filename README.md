@@ -341,8 +341,9 @@ A note about wrk2's latency measurement technique:
   
   ![CO example]
   
-  For example, the output below demonstrates the difference in recorded
-  latency distribution for two runs:
+  These differences can be seen in detail in the output provided when 
+  the --u_latency flag is used. For example, the output below demonstrates
+  the difference in recorded latency distribution for two runs:
 
   The first ["Example 1" below] is a relatively "quiet" run with no large
   outliers (the worst case seen was 11msec), and even wit the 99'%ile exhibit
