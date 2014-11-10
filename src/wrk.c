@@ -387,8 +387,8 @@ static int calibrate(aeEventLoop *loop, long long id, void *data) {
     thread->interval = interval;
     thread->requests = 0;
 
-    printf("  Thread calibration: mean lat.: %lld usec, rate sampling interval: %d msec\n",
-            thread->mean,
+    printf("  Thread calibration: mean lat.: %.3fms, rate sampling interval: %dms\n",
+            (thread->mean)/1000.0,
             thread->interval);
 
     aeCreateTimeEvent(loop, thread->interval, sample_rate, thread, NULL);
@@ -834,7 +834,7 @@ static void print_hdr_latency(struct hdr_histogram* histogram, const char* descr
         printf("\n");
     }
     printf("\n%s\n", "  Detailed Percentile spectrum:");
-    hdr_percentiles_print(histogram, stdout, 5, 1.0, CLASSIC);
+    hdr_percentiles_print(histogram, stdout, 5, 1000.0, CLASSIC);
 }
 
 static void print_stats_latency(stats *stats) {
