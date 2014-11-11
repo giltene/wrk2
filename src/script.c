@@ -240,7 +240,7 @@ static int script_stats_get(lua_State *L) {
     if (lua_isnumber(L, 2)) {
         int index = luaL_checkint(L, 2);
         if (s->histogram) {
-            double percentile = ((double) index) / s->histogram->total_count;
+            double percentile = 100.0 * ((double) index) / s->histogram->total_count;
             int64_t value = hdr_value_at_percentile(s->histogram, percentile);
             lua_pushnumber(L, value);
         } else {
