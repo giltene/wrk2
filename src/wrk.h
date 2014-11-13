@@ -66,7 +66,7 @@ typedef struct connection {
     buffer headers;
     buffer body;
     char buf[RECVBUF];
-    uint64_t latency_start;
+    uint64_t actual_latency_start;
     bool has_pending;
     bool caught_up;
     // Internal tracking numbers (used purely for debugging):

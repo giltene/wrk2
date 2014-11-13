@@ -20,6 +20,7 @@ static struct config {
     bool     latency;
     bool     u_latency;
     bool     dynamic;
+    bool     record_all_reponses;
     char    *script;
     SSL_CTX *ctx;
 } cfg;
@@ -59,6 +60,9 @@ static void usage() {
            "    -L  --latency          Print latency statistics   \n"
            "    -U  --u_latency        Print uncorrceted latency statistics\n"
            "        --timeout     <T>  Socket/request timeout     \n"
+           "    -B, --batch_latency    Measure latency of whole   \n"
+           "                           batches of pipelined ops   \n"
+           "                           (as opposed to each op)    \n"
            "    -v, --version          Print version details      \n"
            "    -R, --rate        <T>  work rate (throughput)     \n"
            "                           in requests/sec (total)    \n"
@@ -531,7 +535,7 @@ static int response_complete(http_parser *parser) {
         goto done;
     }
 
-    // Count are record latency for all responses (including pipelined ones:)
+    // Count all responses (including pipelined ones:)
     c->complete++;
 
     // Note that expected start time is computed based on the completed
@@ -571,14 +575,17 @@ static int response_complete(http_parser *parser) {
     c->latest_should_send_time = 0;
     c->latest_expected_start = 0;
 
-    hdr_record_value(thread->latency_histogram, expected_latency_timing);
-
-    uint64_t latency_timing = now - c->latency_start;
-    hdr_record_value(thread->u_latency_histogram, latency_timing);
-
     if (--c->pending == 0) {
         c->has_pending = false;
         aeCreateFileEvent(thread->loop, c->fd, AE_WRITABLE, socket_writeable, c);
+    }
+
+    // Record if needed, either last in batch or all, depending in cfg:
+    if (cfg.record_all_reponses || !c->has_pending) {
+        hdr_record_value(thread->latency_histogram, expected_latency_timing);
+
+        uint64_t actual_latency_timing = now - c->actual_latency_start;
+        hdr_record_value(thread->u_latency_histogram, actual_latency_timing);
     }
 
 
@@ -652,7 +659,7 @@ static void socket_writeable(aeEventLoop *loop, int fd, void *data, int mask) {
     if (!c->written) {
         c->start = time_us();
         if (!c->has_pending) {
-            c->latency_start = c->start;
+            c->actual_latency_start = c->start;
             c->complete_at_last_batch_start = c->complete;
             c->has_pending = true;
         }
@@ -715,18 +722,19 @@ static char *extract_url_part(char *url, struct http_parser_url *parser_url, enu
 }
 
 static struct option longopts[] = {
-    { "connections", required_argument, NULL, 'c' },
-    { "duration",    required_argument, NULL, 'd' },
-    { "threads",     required_argument, NULL, 't' },
-    { "script",      required_argument, NULL, 's' },
-    { "header",      required_argument, NULL, 'H' },
-    { "latency",     no_argument,       NULL, 'L' },
-    { "u_latency",   no_argument,       NULL, 'U' },
-    { "timeout",     required_argument, NULL, 'T' },
-    { "help",        no_argument,       NULL, 'h' },
-    { "version",     no_argument,       NULL, 'v' },
-    { "rate",        required_argument, NULL, 'R' },
-    { NULL,          0,                 NULL,  0  }
+    { "connections",    required_argument, NULL, 'c' },
+    { "duration",       required_argument, NULL, 'd' },
+    { "threads",        required_argument, NULL, 't' },
+    { "script",         required_argument, NULL, 's' },
+    { "header",         required_argument, NULL, 'H' },
+    { "latency",        no_argument,       NULL, 'L' },
+    { "u_latency",      no_argument,       NULL, 'U' },
+    { "batch_latency",  no_argument,       NULL, 'B' },
+    { "timeout",        required_argument, NULL, 'T' },
+    { "help",           no_argument,       NULL, 'h' },
+    { "version",        no_argument,       NULL, 'v' },
+    { "rate",           required_argument, NULL, 'R' },
+    { NULL,             0,                 NULL,  0  }
 };
 
 static int parse_args(struct config *cfg, char **url, char **headers, int argc, char **argv) {
@@ -738,8 +746,9 @@ static int parse_args(struct config *cfg, char **url, char **headers, int argc, 
     cfg->duration    = 10;
     cfg->timeout     = SOCKET_TIMEOUT_MS;
     cfg->rate        = 0;
+    cfg->record_all_reponses = true;
 
-    while ((c = getopt_long(argc, argv, "t:c:d:s:H:T:R:LUrv?", longopts, NULL)) != -1) {
+    while ((c = getopt_long(argc, argv, "t:c:d:s:H:T:R:LUBrv?", longopts, NULL)) != -1) {
         switch (c) {
             case 't':
                 if (scan_metric(optarg, &cfg->threads)) return -1;
@@ -758,6 +767,9 @@ static int parse_args(struct config *cfg, char **url, char **headers, int argc, 
                 break;
             case 'L':
                 cfg->latency = true;
+                break;
+            case 'B':
+                cfg->record_all_reponses = false;
                 break;
             case 'U':
                 cfg->latency = true;
