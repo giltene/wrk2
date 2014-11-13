@@ -291,8 +291,6 @@ void *thread_main(void *arg) {
 
     double throughput = (thread->throughput / 1000000.0) / thread->connections;
 
-    uint64_t connections_start = time_us();
-
     connection *c = thread->cs;
 
     for (uint64_t i = 0; i < thread->connections; i++, c++) {
@@ -304,9 +302,8 @@ void *thread_main(void *arg) {
         c->catch_up_throughput = throughput * 2;
         c->complete   = 0;
         c->caught_up  = true;
-        c->thread_start = connections_start;
         // Stagger connects 5 msec apart within thread:
-        aeCreateTimeEvent(loop, i * 5, delayed_connect, c, NULL);
+        aeCreateTimeEvent(loop, i * 5, delayed_initial_connect, c, NULL);
     }
 
     uint64_t calibrate_delay = CALIBRATE_DELAY_MS + (thread->connections * 5);
@@ -363,8 +360,9 @@ static int reconnect_socket(thread *thread, connection *c) {
     return connect_socket(thread, c);
 }
 
-static int delayed_connect(aeEventLoop *loop, long long id, void *data) {
+static int delayed_initial_connect(aeEventLoop *loop, long long id, void *data) {
     connection* c = data;
+    c->thread_start = time_us();
     connect_socket(c->thread, c);
     return AE_NOMORE;
 }
@@ -533,48 +531,56 @@ static int response_complete(http_parser *parser) {
         goto done;
     }
 
+    // Count are record latency for all responses (including pipelined ones:)
+    c->complete++;
+
+    // Note that expected start time is computed based on the completed
+    // response count seen at the beginning of the last request batch sent.
+    // A single request batch send may contain multiple requests, and
+    // result in multiple responses. If we incorrectly calculated expect
+    // start time based on the completion count of these individual pipelined
+    // requests we can easily end up "gifting" them time and seeing
+    // negative latencies.
+    uint64_t expected_latency_start = c->thread_start +
+            (c->complete_at_last_batch_start / c->throughput);
+
+    int64_t expected_latency_timing = now - expected_latency_start;
+
+    if (expected_latency_timing < 0) {
+        printf("\n\n ---------- \n\n");
+        printf("We are about to crash and die (recoridng a negative #)");
+        printf("This wil never ever ever happen...");
+        printf("But when it does. The following information will help in debugging");
+        printf("response_complete:\n");
+        printf("  expected_latency_timing = %lld\n", expected_latency_timing);
+        printf("  now = %lld\n", now);
+        printf("  expected_latency_start = %lld\n", expected_latency_start);
+        printf("  c->thread_start = %lld\n", c->thread_start);
+        printf("  c->complete = %lld\n", c->complete);
+        printf("  throughput = %g\n", c->throughput);
+        printf("  latest_should_send_time = %lld\n", c->latest_should_send_time);
+        printf("  latest_expected_start = %lld\n", c->latest_expected_start);
+        printf("  latest_connect = %lld\n", c->latest_connect);
+        printf("  latest_write = %lld\n", c->latest_write);
+
+        expected_latency_start = c->thread_start +
+                ((c->complete ) / c->throughput);
+        printf("  next expected_latency_start = %lld\n", expected_latency_start);
+    }
+
+    c->latest_should_send_time = 0;
+    c->latest_expected_start = 0;
+
+    hdr_record_value(thread->latency_histogram, expected_latency_timing);
+
+    uint64_t latency_timing = now - c->latency_start;
+    hdr_record_value(thread->u_latency_histogram, latency_timing);
+
     if (--c->pending == 0) {
         c->has_pending = false;
-
-        uint64_t expected_latency_start = c->thread_start +
-                (c->complete / c->throughput);
-
-        int64_t expected_latency_timing = now - expected_latency_start;
-
-        if (expected_latency_timing < 0) {
-            printf("\n\n ---------- \n\n");
-            printf("We are about to crash and die (recoridng a negative #)");
-            printf("This wil never ever ever happen...");
-            printf("But when it does. The following information will help in debugging");
-            printf("response_complete:\n");
-            printf("  expected_latency_timing = %lld\n", expected_latency_timing);
-            printf("  now = %lld\n", now);
-            printf("  expected_latency_start = %lld\n", expected_latency_start);
-            printf("  c->thread_start = %lld\n", c->thread_start);
-            printf("  complete = %lld\n", c->complete);
-            printf("  throughput = %g\n", c->throughput);
-            printf("  latest_should_send_time = %lld\n", c->latest_should_send_time);
-            printf("  latest_expected_start = %lld\n", c->latest_expected_start);
-            printf("  latest_connect = %lld\n", c->latest_connect);
-            printf("  latest_write = %lld\n", c->latest_write);
-
-            expected_latency_start = c->thread_start +
-                    ((c->complete + 1) / c->throughput);
-            printf("  next expected_latency_start = %lld\n", expected_latency_start);
-        }
-
-        c->latest_should_send_time = 0;
-        c->latest_expected_start = 0;
-
-        c->complete++;
-
-        hdr_record_value(thread->latency_histogram, expected_latency_timing);
-
-        uint64_t latency_timing = now - c->latency_start;
-        hdr_record_value(thread->u_latency_histogram, latency_timing);
-
         aeCreateFileEvent(thread->loop, c->fd, AE_WRITABLE, socket_writeable, c);
     }
+
 
     if (!http_should_keep_alive(parser)) {
         reconnect_socket(thread, c);
@@ -647,6 +653,7 @@ static void socket_writeable(aeEventLoop *loop, int fd, void *data, int mask) {
         c->start = time_us();
         if (!c->has_pending) {
             c->latency_start = c->start;
+            c->complete_at_last_batch_start = c->complete;
             c->has_pending = true;
         }
         c->pending = cfg.pipeline;

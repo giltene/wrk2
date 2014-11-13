@@ -54,6 +54,7 @@ typedef struct connection {
     double throughput;
     double catch_up_throughput;
     uint64_t complete;
+    uint64_t complete_at_last_batch_start;
     uint64_t catch_up_start_time;
     uint64_t complete_at_catch_up_start;
     uint64_t thread_start;
