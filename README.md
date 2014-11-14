@@ -1,4 +1,6 @@
-wrk2 - a HTTP benchmarking tool based mostly on wrk
+# wrk2
+
+  **a HTTP benchmarking tool based mostly on wrk**
 
   wrk2 is wrk modifed to produce a constant throughput load, and
   accurate latency details to the high 9s (i.e. can produce
@@ -52,9 +54,9 @@ wrk2 - a HTTP benchmarking tool based mostly on wrk
   processing, and custom reporting. Several example scripts are located in
   scripts/
 
-Basic Usage
+## Basic Usage
 
-  wrk -t2 -c100 -d30s -R2000 http://127.0.0.1:8080/index.html
+    wrk -t2 -c100 -d30s -R2000 http://127.0.0.1:8080/index.html
 
   This runs a benchmark for 30 seconds, using 2 threads, keeping
   100 HTTP connections open, and a constant throughput of 2000 requests
@@ -66,23 +68,23 @@ Basic Usage
 
   Output:
 
-  Running 30s test @ http://127.0.0.1:80/index.html
-    2 threads and 100 connections
-    Thread calibration: mean lat.: 9747 usec, rate sampling interval: 21 msec
-    Thread calibration: mean lat.: 9631 usec, rate sampling interval: 21 msec
-    Thread Stats   Avg      Stdev     Max   +/- Stdev
-      Latency     6.46ms    1.93ms  12.34ms   67.66%
-      Req/Sec     1.05k     1.12k    2.50k    64.84%
-    60017 requests in 30.01s, 19.81MB read
-  Requests/sec:   2000.15
-  Transfer/sec:    676.14KB
+    Running 30s test @ http://127.0.0.1:80/index.html
+      2 threads and 100 connections
+      Thread calibration: mean lat.: 9747 usec, rate sampling interval: 21 msec
+      Thread calibration: mean lat.: 9631 usec, rate sampling interval: 21 msec
+      Thread Stats   Avg      Stdev     Max   +/- Stdev
+        Latency     6.46ms    1.93ms  12.34ms   67.66%
+        Req/Sec     1.05k     1.12k    2.50k    64.84%
+      60017 requests in 30.01s, 19.81MB read
+    Requests/sec:   2000.15
+    Transfer/sec:    676.14KB
 
   However, wrk2 will usually be run with the --latency flag, which provides
   detailed latency percentile information (in a format that can be easily
   imported to spreadsheets or gnuplot scripts and plotted per examples
   provided at http://hdrhistogram.org):
 
-  wrk -t2 -c100 -d30s -R2000 --latency http://127.0.0.1:80/index.html
+    wrk -t2 -c100 -d30s -R2000 --latency http://127.0.0.1:80/index.html
 
   Output:
 
@@ -194,7 +196,7 @@ Basic Usage
     Transfer/sec:    676.18KB
 
 
-Scripting
+## Scripting
 
   wrk's public Lua API is:
 
@@ -252,7 +254,7 @@ Scripting
       }
     }
 
-Benchmarking Tips
+## Benchmarking Tips
 
   The machine running wrk must have a sufficient number of ephemeral ports
   available and closed sockets should be recycled quickly. To handle the
@@ -266,7 +268,7 @@ Benchmarking Tips
   request, and use of response() will necessarily reduce the amount of load
   that can be generated.
 
-Acknowledgements
+## Acknowledgements
 
   wrk2 is obviously based on wrk, and credit goes to wrk's authors for
   pretty much everything.
