@@ -650,12 +650,6 @@ static void socket_writeable(aeEventLoop *loop, int fd, void *data, int mask) {
     size_t len = c->length  - c->written;
     size_t n;
 
-    switch (sock.write(c, buf, len, &n)) {
-        case OK:    break;
-        case ERROR: goto error;
-        case RETRY: return;
-    }
-
     if (!c->written) {
         c->start = time_us();
         if (!c->has_pending) {
@@ -664,6 +658,12 @@ static void socket_writeable(aeEventLoop *loop, int fd, void *data, int mask) {
             c->has_pending = true;
         }
         c->pending = cfg.pipeline;
+    }
+
+    switch (sock.write(c, buf, len, &n)) {
+        case OK:    break;
+        case ERROR: goto error;
+        case RETRY: return;
     }
 
     c->written += n;
