@@ -20,7 +20,7 @@ static struct config {
     bool     latency;
     bool     u_latency;
     bool     dynamic;
-    bool     record_all_reponses;
+    bool     record_all_responses;
     char    *script;
     SSL_CTX *ctx;
 } cfg;
@@ -581,7 +581,7 @@ static int response_complete(http_parser *parser) {
     }
 
     // Record if needed, either last in batch or all, depending in cfg:
-    if (cfg.record_all_reponses || !c->has_pending) {
+    if (cfg.record_all_responses || !c->has_pending) {
         hdr_record_value(thread->latency_histogram, expected_latency_timing);
 
         uint64_t actual_latency_timing = now - c->actual_latency_start;
@@ -746,7 +746,7 @@ static int parse_args(struct config *cfg, char **url, char **headers, int argc, 
     cfg->duration    = 10;
     cfg->timeout     = SOCKET_TIMEOUT_MS;
     cfg->rate        = 0;
-    cfg->record_all_reponses = true;
+    cfg->record_all_responses = true;
 
     while ((c = getopt_long(argc, argv, "t:c:d:s:H:T:R:LUBrv?", longopts, NULL)) != -1) {
         switch (c) {
@@ -769,7 +769,7 @@ static int parse_args(struct config *cfg, char **url, char **headers, int argc, 
                 cfg->latency = true;
                 break;
             case 'B':
-                cfg->record_all_reponses = false;
+                cfg->record_all_responses = false;
                 break;
             case 'U':
                 cfg->latency = true;
