@@ -1,6 +1,7 @@
 // Copyright (C) 2012 - Will Glozer.  All rights reserved.
 
 #include "wrk.h"
+#include "script.h"
 #include "main.h"
 #include "hdr_histogram.h"
 #include "stats.h"
@@ -9,7 +10,6 @@
 #define MAX_LATENCY 24L * 60 * 60 * 1000000
 
 static struct config {
-    struct addrinfo addr;
     uint64_t threads;
     uint64_t connections;
     uint64_t duration;
@@ -74,57 +74,18 @@ static void usage() {
 }
 
 int main(int argc, char **argv) {
-    struct addrinfo *addrs, *addr;
-    struct http_parser_url parser_url;
-    char *url, **headers;
-    int rc;
+    char *url, **headers = zmalloc(argc * sizeof(char *));
+    struct http_parser_url parts = {};
 
-    headers = zmalloc((argc / 2) * sizeof(char *));
-
-    if (parse_args(&cfg, &url, headers, argc, argv)) {
+    if (parse_args(&cfg, &url, &parts, headers, argc, argv)) {
         usage();
         exit(1);
     }
 
-    if (http_parser_parse_url(url, strlen(url), 0, &parser_url)) {
-        fprintf(stderr, "invalid URL: %s\n", url);
-        exit(1);
-    }
-
-    char *schema  = extract_url_part(url, &parser_url, UF_SCHEMA);
-    char *host    = extract_url_part(url, &parser_url, UF_HOST);
-    char *port    = extract_url_part(url, &parser_url, UF_PORT);
+    char *schema  = copy_url_part(url, &parts, UF_SCHEMA);
+    char *host    = copy_url_part(url, &parts, UF_HOST);
+    char *port    = copy_url_part(url, &parts, UF_PORT);
     char *service = port ? port : schema;
-    char *path    = "/";
-
-    if (parser_url.field_set & (1 << UF_PATH)) {
-        path = &url[parser_url.field_data[UF_PATH].off];
-    }
-
-    struct addrinfo hints = {
-        .ai_family   = AF_UNSPEC,
-        .ai_socktype = SOCK_STREAM
-    };
-
-    if ((rc = getaddrinfo(host, service, &hints, &addrs)) != 0) {
-        const char *msg = gai_strerror(rc);
-        fprintf(stderr, "unable to resolve %s:%s %s\n", host, service, msg);
-        exit(1);
-    }
-
-    for (addr = addrs; addr != NULL; addr = addr->ai_next) {
-        int fd = socket(addr->ai_family, addr->ai_socktype, addr->ai_protocol);
-        if (fd == -1) continue;
-        rc = connect(fd, addr->ai_addr, addr->ai_addrlen);
-        close(fd);
-        if (rc == 0) break;
-    }
-
-    if (addr == NULL) {
-        char *msg = strerror(errno);
-        fprintf(stderr, "unable to connect to %s:%s %s\n", host, service, msg);
-        exit(1);
-    }
 
     if (!strncmp("https", schema, 5)) {
         if ((cfg.ctx = ssl_init()) == NULL) {
@@ -141,13 +102,21 @@ int main(int argc, char **argv) {
 
     signal(SIGPIPE, SIG_IGN);
     signal(SIGINT,  SIG_IGN);
-    cfg.addr = *addr;
 
     pthread_mutex_init(&statistics.mutex, NULL);
     statistics.requests = stats_alloc(10);
+    thread *threads = zcalloc(cfg.threads * sizeof(thread));
+
     hdr_init(1, MAX_LATENCY, 3, &(statistics.requests->histogram));
 
-    thread *threads = zcalloc(cfg.threads * sizeof(thread));
+
+    lua_State *L = script_create(cfg.script, url, headers);
+    if (!script_resolve(L, host, service)) {
+        char *msg = strerror(errno);
+        fprintf(stderr, "unable to connect to %s:%s %s\n", host, service, msg);
+        exit(1);
+    }
+    
     uint64_t connections = cfg.connections / cfg.threads;
     uint64_t throughput = cfg.rate / cfg.threads;
     uint64_t stop_at     = time_us() + (cfg.duration * 1000000);
@@ -159,9 +128,8 @@ int main(int argc, char **argv) {
         t->throughput = throughput;;
         t->stop_at     = stop_at;
 
-        t->L = script_create(schema, host, port, path);
-        script_headers(t->L, headers);
-        script_init(t->L, cfg.script, argc - optind, &argv[optind]);
+        t->L = script_create(cfg.script, url, headers);
+        script_init(L, t, argc - optind, &argv[optind]);
 
         if (i == 0) {
             cfg.pipeline = script_verify_request(t->L);
@@ -267,7 +235,6 @@ int main(int argc, char **argv) {
     printf("Requests/sec: %9.2Lf\n", req_per_s);
     printf("Transfer/sec: %10sB\n", format_binary(bytes_per_s));
 
-    lua_State *L = threads[0].L;
     if (script_has_done(L)) {
         script_summary(L, runtime_us, complete, bytes);
         script_errors(L, &errors);
@@ -326,16 +293,16 @@ void *thread_main(void *arg) {
 }
 
 static int connect_socket(thread *thread, connection *c) {
-    struct addrinfo addr = cfg.addr;
+    struct addrinfo *addr = thread->addr;
     struct aeEventLoop *loop = thread->loop;
     int fd, flags;
 
-    fd = socket(addr.ai_family, addr.ai_socktype, addr.ai_protocol);
+    fd = socket(addr->ai_family, addr->ai_socktype, addr->ai_protocol);
 
     flags = fcntl(fd, F_GETFL, 0);
     fcntl(fd, F_SETFL, flags | O_NONBLOCK);
 
-    if (connect(fd, addr.ai_addr, addr.ai_addrlen) == -1) {
+    if (connect(fd, addr->ai_addr, addr->ai_addrlen) == -1) {
         if (errno != EINPROGRESS) goto error;
     }
 
@@ -614,7 +581,7 @@ static void socket_connected(aeEventLoop *loop, int fd, void *data, int mask) {
 
     aeCreateFileEvent(c->thread->loop, fd, AE_READABLE, socket_readable, c);
 
-    aeCreateFileEvent(c->thread->loop, c->fd, AE_WRITABLE, socket_writeable, c);
+    aeCreateFileEvent(c->thread->loop, fd, AE_WRITABLE, socket_writeable, c);
 
     return;
 
@@ -708,12 +675,12 @@ static uint64_t time_us() {
     return (t.tv_sec * 1000000) + t.tv_usec;
 }
 
-static char *extract_url_part(char *url, struct http_parser_url *parser_url, enum http_parser_url_fields field) {
+static char *copy_url_part(char *url, struct http_parser_url *parts, enum http_parser_url_fields field) {
     char *part = NULL;
 
-    if (parser_url->field_set & (1 << field)) {
-        uint16_t off = parser_url->field_data[field].off;
-        uint16_t len = parser_url->field_data[field].len;
+    if (parts->field_set & (1 << field)) {
+        uint16_t off = parts->field_data[field].off;
+        uint16_t len = parts->field_data[field].len;
         part = zcalloc(len + 1 * sizeof(char));
         memcpy(part, &url[off], len);
     }
@@ -737,7 +704,7 @@ static struct option longopts[] = {
     { NULL,             0,                 NULL,  0  }
 };
 
-static int parse_args(struct config *cfg, char **url, char **headers, int argc, char **argv) {
+static int parse_args(struct config *cfg, char **url, struct http_parser_url *parts, char **headers, int argc, char **argv) {
     char c, **header = headers;
 
     memset(cfg, 0, sizeof(struct config));
@@ -795,6 +762,11 @@ static int parse_args(struct config *cfg, char **url, char **headers, int argc, 
     }
 
     if (optind == argc || !cfg->threads || !cfg->duration) return -1;
+
+    if (!script_parse_url(argv[optind], parts)) {
+        fprintf(stderr, "invalid URL: %s\n", argv[optind]);
+        return -1;
+    }
 
     if (!cfg->connections || cfg->connections < cfg->threads) {
         fprintf(stderr, "number of connections must be >= threads\n");
