@@ -1,4 +1,5 @@
 # wrk2
+[![Gitter](https://badges.gitter.im/Join Chat.svg)](https://gitter.im/giltene/wrk2?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
 
   **a HTTP benchmarking tool based mostly on wrk**
 
@@ -191,7 +192,6 @@
     #[Max     =       12.496, Total count    =        39500]
     #[Buckets =           27, SubBuckets     =         2048]
     ----------------------------------------------------------
-[![Gitter](https://badges.gitter.im/Join Chat.svg)](https://gitter.im/giltene/wrk2?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
     60018 requests in 30.00s, 19.81MB read
     Requests/sec:   2000.28
     Transfer/sec:    676.18KB
