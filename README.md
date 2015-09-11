@@ -37,6 +37,10 @@
   latency reporting is significantly more accurate (as in "correct") than
   that of wrk's current (Nov. 2014) execution model.
 
+  It is important to note that in wrk2's current constant-throughput
+  implementation, measured latencies are [only] accurate to a +/- ~1 msec
+  granularity, due to OS sleep time behavior.
+
   wrk2 is currently in experimental/development mode, and may well be
   merged into wrk in the future if others see fit to adopt it's changes.
 
