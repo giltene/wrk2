@@ -22,9 +22,9 @@ static int script_thread_newindex(lua_State *);
 static int script_wrk_lookup(lua_State *);
 static int script_wrk_connect(lua_State *);
 
-static void set_fields(lua_State *, int index, const table_field *);
-static void set_string(lua_State *, int, char *, char *, size_t);
-static char *get_url_part(char *, struct http_parser_url *, enum http_parser_url_fields, size_t *);
+static void set_fields(lua_State *, int, const table_field *);
+static void set_field(lua_State *, int, char *, int);
+static int push_url_part(lua_State *, char *, struct http_parser_url *, enum http_parser_url_fields);
 
 static const struct luaL_reg addrlib[] = {
     { "__tostring", script_addr_tostring   },
@@ -59,7 +59,6 @@ lua_State *script_create(char *file, char *url, char **headers) {
     struct http_parser_url parts = {};
     script_parse_url(url, &parts);
     char *path = "/";
-    size_t len = 0;
 
     if (parts.field_set & (1 << UF_PATH)) {
         path = &url[parts.field_data[UF_PATH].off];
@@ -74,9 +73,9 @@ lua_State *script_create(char *file, char *url, char **headers) {
 
     lua_getglobal(L, "wrk");
 
-    set_string(L, 4, "scheme", get_url_part(url, &parts, UF_SCHEMA, &len), len);
-    set_string(L, 4, "host",   get_url_part(url, &parts, UF_HOST,   &len), len);
-    set_string(L, 4, "port",   get_url_part(url, &parts, UF_PORT,   &len), len);
+    set_field(L, 4, "scheme", push_url_part(L, url, &parts, UF_SCHEMA));
+    set_field(L, 4, "host",   push_url_part(L, url, &parts, UF_HOST));
+    set_field(L, 4, "port",   push_url_part(L, url, &parts, UF_PORT));
     set_fields(L, 4, fields);
 
     lua_getfield(L, 4, "headers");
@@ -104,7 +103,7 @@ bool script_resolve(lua_State *L, char *host, char *service) {
     lua_getfield(L, -1, "resolve");
     lua_pushstring(L, host);
     lua_pushstring(L, service);
-    lua_pcall(L, 2, 0, 0);
+    lua_call(L, 2, 0);
 
     lua_getfield(L, -1, "addrs");
     size_t count = lua_objlen(L, -1);
@@ -128,7 +127,7 @@ void script_init(lua_State *L, thread *t, int argc, char **argv) {
     lua_getglobal(L, "wrk");
     lua_getfield(L, -1, "setup");
     script_push_thread(L, t);
-    lua_pcall(L, 1, 0, 0);
+    lua_call(L, 1, 0);
     lua_pop(L, 1);
 
     lua_getfield(t->L, -1, "init");
@@ -137,7 +136,7 @@ void script_init(lua_State *L, thread *t, int argc, char **argv) {
         lua_pushstring(t->L, argv[i]);
         lua_rawseti(t->L, -2, i);
     }
-    lua_pcall(t->L, 1, 0, 0);
+    lua_call(t->L, 1, 0);
     lua_pop(t->L, 1);
 }
 
@@ -149,7 +148,7 @@ void script_request(lua_State *L, char **buf, size_t *len) {
         lua_getfield(L, -1, "request");
         pop += 2;
     }
-    lua_pcall(L, 0, 1, 0);
+    lua_call(L, 0, 1);
     const char *str = lua_tolstring(L, -1, len);
     *buf = realloc(*buf, *len);
     memcpy(*buf, str, *len);
@@ -168,7 +167,7 @@ void script_response(lua_State *L, int status, buffer *headers, buffer *body) {
     }
 
     lua_pushlstring(L, body->buffer, body->cursor - body->buffer);
-    lua_pcall(L, 3, 0, 0);
+    lua_call(L, 3, 0);
 
     buffer_reset(headers);
     buffer_reset(body);
@@ -245,7 +244,7 @@ void script_done(lua_State *L, stats *latency, stats *requests) {
     luaL_getmetatable(L, "wrk.stats");
     lua_setmetatable(L, 5);
 
-    lua_pcall(L, 3, 0, 0);
+    lua_call(L, 3, 0);
     lua_pop(L, 1);
 }
 
@@ -509,20 +508,24 @@ int script_parse_url(char *url, struct http_parser_url *parts) {
     return 0;
 }
 
-static char *get_url_part(char *url, struct http_parser_url *parts, enum http_parser_url_fields field, size_t *len) {
-    char *value = NULL;
-    if (parts->field_set & (1 << field)) {
-        value = &url[parts->field_data[field].off];
-        *len  = parts->field_data[field].len;
+static int push_url_part(lua_State *L, char *url, struct http_parser_url *parts, enum http_parser_url_fields field) {
+    int type = parts->field_set & (1 << field) ? LUA_TSTRING : LUA_TNIL;
+    uint16_t off, len;
+    switch (type) {
+        case LUA_TSTRING:
+            off = parts->field_data[field].off;
+            len = parts->field_data[field].len;
+            lua_pushlstring(L, &url[off], len);
+            break;
+        case LUA_TNIL:
+            lua_pushnil(L);
     }
-    return value;
+    return type;
 }
 
-static void set_string(lua_State *L, int index, char *field, char *value, size_t len) {
-    if (value != NULL) {
-        lua_pushlstring(L, value, len);
-        lua_setfield(L, index, field);
-    }
+static void set_field(lua_State *L, int index, char *field, int type) {
+    (void) type;
+    lua_setfield(L, index, field);
 }
 
 static void set_fields(lua_State *L, int index, const table_field *fields) {
