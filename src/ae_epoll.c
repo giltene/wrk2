@@ -114,7 +114,7 @@ static int aeApiPoll(aeEventLoop *eventLoop, struct timeval *tvp) {
             int mask = 0;
             struct epoll_event *e = state->events+j;
 
-            if (e->events & EPOLLIN) mask |= AE_READABLE;
+            if (e->events & (EPOLLIN | EPOLLRDHUP | EPOLLHUP)) mask |= AE_READABLE;
             if (e->events & EPOLLOUT) mask |= AE_WRITABLE;
             if (e->events & EPOLLERR) mask |= AE_WRITABLE;
             if (e->events & EPOLLHUP) mask |= AE_WRITABLE;
