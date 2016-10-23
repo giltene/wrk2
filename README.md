@@ -323,7 +323,7 @@ A note about wrk2's latency measurement technique:
 
   The model I chose for avoiding Coordinated Omission in wrk2 combines
   the use of constant throughput load generation with latency
-  measurement that takes the intended constant throughout into account.
+  measurement that takes the intended constant throughput into account.
   Rather than measure response latency from the time that the actual
   transmission of a request occurred, wrk2 measures response latency
   from the time the transmission *should* have occurred according to the
