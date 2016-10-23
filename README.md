@@ -332,11 +332,11 @@ A note about wrk2's latency measurement technique:
   the true latency of the subsequent requests will be appropriately
   reflected in the recorded latency stats.
 
-  Note: This technique can be applied to variable throughout loaders.
+  Note: This technique can be applied to variable throughput loaders.
         It requires a "model" or "plan" that can provide the intended
-        start time if each request. Constant throughout load generators
+        start time if each request. Constant throughput load generators
         Make this trivial to model. More complicated schemes (such as
-        varying throughout or stochastic arrival models) would likely
+        varying throughput or stochastic arrival models) would likely
         require a detailed model and some memory to provide this
         information.
 
