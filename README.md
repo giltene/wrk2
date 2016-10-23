@@ -330,7 +330,7 @@ A note about wrk2's latency measurement technique:
   constant throughput configured for the run. When responses take longer
   than normal (arriving later than the next request should have been sent),
   the true latency of the subsequent requests will be appropriately
-  reflected in teh recorded latency stats.
+  reflected in the recorded latency stats.
 
   Note: This technique can be applied to variable throughout loaders.
         It requires a "model" or "plan" that can provide the intended
