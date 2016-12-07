@@ -1,0 +1,20 @@
+[
+  {
+    "method": "GET",
+    "host": "127.0.0.1",
+    "port": "8080",
+    "path": "/1.html"
+  },
+  {
+    "method": "GET",
+    "host": "127.0.0.2",
+    "port": "8080",
+    "path": "/2.html"
+  },
+  {
+    "method": "GET",
+    "host": "127.0.0.3",
+    "port": "8888",
+    "path": "/3.html"
+  }
+]
