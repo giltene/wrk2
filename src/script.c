@@ -471,7 +471,7 @@ static int script_wrk_connect(lua_State *L) {
     return 1;
 }
 
-static int script_wrk_time_us(lua_State *L) {	/* dMan */
+static int script_wrk_time_us(lua_State *L) {
     struct timeval tv;
     gettimeofday(&tv, NULL);
     uint64_t now = (tv.tv_sec * 1000000) + tv.tv_usec;
