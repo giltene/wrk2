@@ -788,6 +788,11 @@ static int parse_args(struct config *cfg, char **url, struct http_parser_url *pa
         return -1;
     }
 
+    if (cfg->rate < cfg->threads) {
+        fprintf(stderr, "rate must be >= threads\n");
+        return -1;
+    }
+
     if (cfg->rate == 0) {
         fprintf(stderr,
                 "Throughput MUST be specified with the --rate or -R option\n");
