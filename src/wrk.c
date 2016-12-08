@@ -367,9 +367,11 @@ static int calibrate(aeEventLoop *loop, long long id, void *data) {
     thread->interval = interval;
     thread->requests = 0;
 
-    printf("  Thread calibration: mean lat.: %.3fms, rate sampling interval: %dms\n",
-            (thread->mean)/1000.0,
-            thread->interval);
+    if (!cfg.quiet) {
+        printf("  Thread calibration: mean lat.: %.3fms, rate sampling interval: %dms\n",
+                (thread->mean)/1000.0,
+                thread->interval);
+    }
 
     aeCreateTimeEvent(loop, thread->interval, sample_rate, thread, NULL);
 
