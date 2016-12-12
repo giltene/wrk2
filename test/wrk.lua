@@ -149,7 +149,7 @@ function response(status, headers, body)
   local time_us = wrk.time_us()
   local delay = time_us - start_us
   local cont_len = headers["Content-Length"]
-  if (cont_len = nil) then
+  if (cont_len == nil) then
     cont_len = 0
   end
 
