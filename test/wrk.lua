@@ -149,6 +149,9 @@ function response(status, headers, body)
   local time_us = wrk.time_us()
   local delay = time_us - start_us
   local cont_len = headers["Content-Length"]
+  if (cont_len = nil) then
+    cont_len = 0
+  end
 
 --  io.write(msg:format(start_us,delay,id,responses,cont_len,wrk.thread.addr,port,path))
   io.write(msg:format(start_us,delay,status,cont_len,method,host,port,path,id,responses))
