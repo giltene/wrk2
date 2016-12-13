@@ -121,7 +121,7 @@ int main(int argc, char **argv) {
     }
 
     uint64_t connections = cfg.connections / cfg.threads;
-    uint64_t throughput = cfg.rate / cfg.threads;
+    double throughput    = (double)cfg.rate / cfg.threads;
     uint64_t stop_at     = time_us() + (cfg.duration * 1000000);
 
     for (uint64_t i = 0; i < cfg.threads; i++) {
@@ -536,20 +536,20 @@ static int response_complete(http_parser *parser) {
         printf("This wil never ever ever happen...");
         printf("But when it does. The following information will help in debugging");
         printf("response_complete:\n");
-        printf("  expected_latency_timing = %lld\n", expected_latency_timing);
-        printf("  now = %lld\n", now);
-        printf("  expected_latency_start = %lld\n", expected_latency_start);
-        printf("  c->thread_start = %lld\n", c->thread_start);
-        printf("  c->complete = %lld\n", c->complete);
+        printf("  expected_latency_timing = %ld\n", expected_latency_timing);
+        printf("  now = %ld\n", now);
+        printf("  expected_latency_start = %ld\n", expected_latency_start);
+        printf("  c->thread_start = %ld\n", c->thread_start);
+        printf("  c->complete = %ld\n", c->complete);
         printf("  throughput = %g\n", c->throughput);
-        printf("  latest_should_send_time = %lld\n", c->latest_should_send_time);
-        printf("  latest_expected_start = %lld\n", c->latest_expected_start);
-        printf("  latest_connect = %lld\n", c->latest_connect);
-        printf("  latest_write = %lld\n", c->latest_write);
+        printf("  latest_should_send_time = %ld\n", c->latest_should_send_time);
+        printf("  latest_expected_start = %ld\n", c->latest_expected_start);
+        printf("  latest_connect = %ld\n", c->latest_connect);
+        printf("  latest_write = %ld\n", c->latest_write);
 
         expected_latency_start = c->thread_start +
                 ((c->complete ) / c->throughput);
-        printf("  next expected_latency_start = %lld\n", expected_latency_start);
+        printf("  next expected_latency_start = %ld\n", expected_latency_start);
     }
 
     c->latest_should_send_time = 0;
@@ -787,11 +787,6 @@ static int parse_args(struct config *cfg, char **url, struct http_parser_url *pa
 
     if (!cfg->connections || cfg->connections < cfg->threads) {
         fprintf(stderr, "number of connections must be >= threads\n");
-        return -1;
-    }
-
-    if (cfg->rate < cfg->threads) {
-        fprintf(stderr, "rate must be >= threads\n");
         return -1;
     }
 

@@ -28,8 +28,9 @@ function load_request_objects_from_file(file)
 
     io.close(f)
   else
-    -- Return the empty array
-    return lines
+    local msg = "load_request_objects_from_file(): unable to open %s\n"
+    io.write(msg:format(file))
+    os.exit()
   end
 
   -- Translate Lua value to/from JSON
