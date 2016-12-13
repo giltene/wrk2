@@ -536,20 +536,20 @@ static int response_complete(http_parser *parser) {
         printf("This wil never ever ever happen...");
         printf("But when it does. The following information will help in debugging");
         printf("response_complete:\n");
-        printf("  expected_latency_timing = %ld\n", expected_latency_timing);
-        printf("  now = %ld\n", now);
-        printf("  expected_latency_start = %ld\n", expected_latency_start);
-        printf("  c->thread_start = %ld\n", c->thread_start);
-        printf("  c->complete = %ld\n", c->complete);
+        printf("  expected_latency_timing = %" PRId64 "\n", expected_latency_timing);
+        printf("  now = %" PRId64 "\n", now);
+        printf("  expected_latency_start = %" PRId64 "\n", expected_latency_start);
+        printf("  c->thread_start = %" PRId64 "\n", c->thread_start);
+        printf("  c->complete = %" PRId64 "\n", c->complete);
         printf("  throughput = %g\n", c->throughput);
-        printf("  latest_should_send_time = %ld\n", c->latest_should_send_time);
-        printf("  latest_expected_start = %ld\n", c->latest_expected_start);
-        printf("  latest_connect = %ld\n", c->latest_connect);
-        printf("  latest_write = %ld\n", c->latest_write);
+        printf("  latest_should_send_time = %" PRId64 "\n", c->latest_should_send_time);
+        printf("  latest_expected_start = %" PRId64 "\n", c->latest_expected_start);
+        printf("  latest_connect = %" PRId64 "\n", c->latest_connect);
+        printf("  latest_write = %" PRId64 "\n", c->latest_write);
 
         expected_latency_start = c->thread_start +
                 ((c->complete ) / c->throughput);
-        printf("  next expected_latency_start = %ld\n", expected_latency_start);
+        printf("  next expected_latency_start = %" PRId64 "\n", expected_latency_start);
     }
 
     c->latest_should_send_time = 0;
