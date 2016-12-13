@@ -60,7 +60,7 @@ static void usage() {
            "    -H, --header      <H>  Add header to request      \n"
            "    -q, --quiet            Quiet mode                 \n"
            "    -L  --latency          Print latency statistics   \n"
-           "    -U  --u_latency        Print uncorrceted latency statistics\n"
+           "    -U  --u_latency        Print uncorrected latency statistics\n"
            "        --timeout     <T>  Socket/request timeout     \n"
            "    -B, --batch_latency    Measure latency of whole   \n"
            "                           batches of pipelined ops   \n"
