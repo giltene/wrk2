@@ -21,6 +21,7 @@ static struct config {
     bool     u_latency;
     bool     dynamic;
     bool     record_all_responses;
+    char    *host;
     char    *script;
     SSL_CTX *ctx;
 } cfg;
@@ -99,7 +100,9 @@ int main(int argc, char **argv) {
         sock.write    = ssl_write;
         sock.readable = ssl_readable;
     }
-
+	
+    cfg.host = host;
+	
     signal(SIGPIPE, SIG_IGN);
     signal(SIGINT,  SIG_IGN);
 
@@ -570,7 +573,7 @@ static int response_complete(http_parser *parser) {
 static void socket_connected(aeEventLoop *loop, int fd, void *data, int mask) {
     connection *c = data;
 
-    switch (sock.connect(c)) {
+    switch (sock.connect(c, cfg.host)) {
         case OK:    break;
         case ERROR: goto error;
         case RETRY: return;
