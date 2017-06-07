@@ -17,6 +17,7 @@ static struct config {
     uint64_t pipeline;
     uint64_t rate;
     uint64_t delay_ms;
+    bool     quiet;
     bool     latency;
     bool     u_latency;
     bool     dynamic;
@@ -57,8 +58,9 @@ static void usage() {
            "                                                      \n"
            "    -s, --script      <S>  Load Lua script file       \n"
            "    -H, --header      <H>  Add header to request      \n"
+           "    -q, --quiet            Quiet mode                 \n"
            "    -L  --latency          Print latency statistics   \n"
-           "    -U  --u_latency        Print uncorrceted latency statistics\n"
+           "    -U  --u_latency        Print uncorrected latency statistics\n"
            "        --timeout     <T>  Socket/request timeout     \n"
            "    -B, --batch_latency    Measure latency of whole   \n"
            "                           batches of pipelined ops   \n"
@@ -111,21 +113,22 @@ int main(int argc, char **argv) {
 
 
     lua_State *L = script_create(cfg.script, url, headers);
+
     if (!script_resolve(L, host, service)) {
         char *msg = strerror(errno);
         fprintf(stderr, "unable to connect to %s:%s %s\n", host, service, msg);
         exit(1);
     }
-    
+
     uint64_t connections = cfg.connections / cfg.threads;
-    uint64_t throughput = cfg.rate / cfg.threads;
+    double throughput    = (double)cfg.rate / cfg.threads;
     uint64_t stop_at     = time_us() + (cfg.duration * 1000000);
 
     for (uint64_t i = 0; i < cfg.threads; i++) {
         thread *t = &threads[i];
         t->loop        = aeCreateEventLoop(10 + cfg.connections * 3);
         t->connections = connections;
-        t->throughput = throughput;;
+        t->throughput  = throughput;
         t->stop_at     = stop_at;
 
         t->L = script_create(cfg.script, url, headers);
@@ -156,9 +159,12 @@ int main(int argc, char **argv) {
     sigaction(SIGINT, &sa, NULL);
 
     char *time = format_time_s(cfg.duration);
-    printf("Running %s test @ %s\n", time, url);
-    printf("  %"PRIu64" threads and %"PRIu64" connections\n",
-            cfg.threads, cfg.connections);
+
+    if (!cfg.quiet) {
+      printf("Running %s test @ %s\n", time, url);
+      printf("  %"PRIu64" threads and %"PRIu64" connections\n",
+              cfg.threads, cfg.connections);
+    }
 
     uint64_t start    = time_us();
     uint64_t complete = 0;
@@ -201,9 +207,12 @@ int main(int argc, char **argv) {
     latency_stats->max = hdr_max(latency_histogram);
     latency_stats->histogram = latency_histogram;
 
-    print_stats_header();
-    print_stats("Latency", latency_stats, format_time_us);
-    print_stats("Req/Sec", statistics.requests, format_metric);
+    if(!cfg.quiet) {
+        print_stats_header();
+        print_stats("Latency", latency_stats, format_time_us);
+        print_stats("Req/Sec", statistics.requests, format_metric);
+    }
+
 //    if (cfg.latency) print_stats_latency(latency_stats);
 
     if (cfg.latency) {
@@ -221,19 +230,21 @@ int main(int argc, char **argv) {
 
     char *runtime_msg = format_time_us(runtime_us);
 
-    printf("  %"PRIu64" requests in %s, %sB read\n",
-            complete, runtime_msg, format_binary(bytes));
-    if (errors.connect || errors.read || errors.write || errors.timeout) {
-        printf("  Socket errors: connect %d, read %d, write %d, timeout %d\n",
-               errors.connect, errors.read, errors.write, errors.timeout);
-    }
+    if (!cfg.quiet) {
+        printf("  %"PRIu64" requests in %s, %sB read\n",
+                complete, runtime_msg, format_binary(bytes));
+        if (errors.connect || errors.read || errors.write || errors.timeout) {
+            printf("  Socket errors: connect %d, read %d, write %d, timeout %d\n",
+                    errors.connect, errors.read, errors.write, errors.timeout);
+        }
 
-    if (errors.status) {
-        printf("  Non-2xx or 3xx responses: %d\n", errors.status);
-    }
+        if (errors.status) {
+            printf("  Non-2xx or 3xx responses: %d\n", errors.status);
+        }
 
-    printf("Requests/sec: %9.2Lf\n", req_per_s);
-    printf("Transfer/sec: %10sB\n", format_binary(bytes_per_s));
+        printf("Requests/sec: %9.2Lf\n", req_per_s);
+        printf("Transfer/sec: %10sB\n", format_binary(bytes_per_s));
+    }
 
     if (script_has_done(L)) {
         script_summary(L, runtime_us, complete, bytes);
@@ -356,9 +367,11 @@ static int calibrate(aeEventLoop *loop, long long id, void *data) {
     thread->interval = interval;
     thread->requests = 0;
 
-    printf("  Thread calibration: mean lat.: %.3fms, rate sampling interval: %dms\n",
-            (thread->mean)/1000.0,
-            thread->interval);
+    if (!cfg.quiet) {
+        printf("  Thread calibration: mean lat.: %.3fms, rate sampling interval: %dms\n",
+                (thread->mean)/1000.0,
+                thread->interval);
+    }
 
     aeCreateTimeEvent(loop, thread->interval, sample_rate, thread, NULL);
 
@@ -523,20 +536,20 @@ static int response_complete(http_parser *parser) {
         printf("This wil never ever ever happen...");
         printf("But when it does. The following information will help in debugging");
         printf("response_complete:\n");
-        printf("  expected_latency_timing = %lld\n", expected_latency_timing);
-        printf("  now = %lld\n", now);
-        printf("  expected_latency_start = %lld\n", expected_latency_start);
-        printf("  c->thread_start = %lld\n", c->thread_start);
-        printf("  c->complete = %lld\n", c->complete);
+        printf("  expected_latency_timing = %" PRId64 "\n", expected_latency_timing);
+        printf("  now = %" PRId64 "\n", now);
+        printf("  expected_latency_start = %" PRId64 "\n", expected_latency_start);
+        printf("  c->thread_start = %" PRId64 "\n", c->thread_start);
+        printf("  c->complete = %" PRId64 "\n", c->complete);
         printf("  throughput = %g\n", c->throughput);
-        printf("  latest_should_send_time = %lld\n", c->latest_should_send_time);
-        printf("  latest_expected_start = %lld\n", c->latest_expected_start);
-        printf("  latest_connect = %lld\n", c->latest_connect);
-        printf("  latest_write = %lld\n", c->latest_write);
+        printf("  latest_should_send_time = %" PRId64 "\n", c->latest_should_send_time);
+        printf("  latest_expected_start = %" PRId64 "\n", c->latest_expected_start);
+        printf("  latest_connect = %" PRId64 "\n", c->latest_connect);
+        printf("  latest_write = %" PRId64 "\n", c->latest_write);
 
         expected_latency_start = c->thread_start +
                 ((c->complete ) / c->throughput);
-        printf("  next expected_latency_start = %lld\n", expected_latency_start);
+        printf("  next expected_latency_start = %" PRId64 "\n", expected_latency_start);
     }
 
     c->latest_should_send_time = 0;
@@ -694,6 +707,7 @@ static struct option longopts[] = {
     { "threads",        required_argument, NULL, 't' },
     { "script",         required_argument, NULL, 's' },
     { "header",         required_argument, NULL, 'H' },
+    { "quiet",          no_argument,       NULL, 'q' },
     { "latency",        no_argument,       NULL, 'L' },
     { "u_latency",      no_argument,       NULL, 'U' },
     { "batch_latency",  no_argument,       NULL, 'B' },
@@ -715,7 +729,7 @@ static int parse_args(struct config *cfg, char **url, struct http_parser_url *pa
     cfg->rate        = 0;
     cfg->record_all_responses = true;
 
-    while ((c = getopt_long(argc, argv, "t:c:d:s:H:T:R:LUBrv?", longopts, NULL)) != -1) {
+    while ((c = getopt_long(argc, argv, "t:c:d:s:H:T:R:qLUBrv?", longopts, NULL)) != -1) {
         switch (c) {
             case 't':
                 if (scan_metric(optarg, &cfg->threads)) return -1;
@@ -731,6 +745,9 @@ static int parse_args(struct config *cfg, char **url, struct http_parser_url *pa
                 break;
             case 'H':
                 *header++ = optarg;
+                break;
+            case 'q':
+                cfg->quiet = true;
                 break;
             case 'L':
                 cfg->latency = true;
