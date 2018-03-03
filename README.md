@@ -1,5 +1,5 @@
 # wrk2
-[![Gitter](https://badges.gitter.im/Join Chat.svg)](https://gitter.im/giltene/wrk2?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
+[![Gitter](https://badges.gitter.im/Join%20Chat.svg)](https://gitter.im/giltene/wrk2?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
 
   **a HTTP benchmarking tool based mostly on wrk**
 
@@ -323,20 +323,20 @@ A note about wrk2's latency measurement technique:
 
   The model I chose for avoiding Coordinated Omission in wrk2 combines
   the use of constant throughput load generation with latency
-  measurement that takes the intended constant throughout into account.
+  measurement that takes the intended constant throughput into account.
   Rather than measure response latency from the time that the actual
   transmission of a request occurred, wrk2 measures response latency
   from the time the transmission *should* have occurred according to the
   constant throughput configured for the run. When responses take longer
   than normal (arriving later than the next request should have been sent),
   the true latency of the subsequent requests will be appropriately
-  reflected in teh recorded latency stats.
+  reflected in the recorded latency stats.
 
-  Note: This technique can be applied to variable throughout loaders.
+  Note: This technique can be applied to variable throughput loaders.
         It requires a "model" or "plan" that can provide the intended
-        start time if each request. Constant throughout load generators
+        start time if each request. Constant throughput load generators
         Make this trivial to model. More complicated schemes (such as
-        varying throughout or stochastic arrival models) would likely
+        varying throughput or stochastic arrival models) would likely
         require a detailed model and some memory to provide this
         information.
 
