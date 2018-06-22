@@ -23,7 +23,13 @@ static unsigned long ssl_id() {
     return (unsigned long) pthread_self();
 }
 
-SSL_CTX *ssl_init() {
+#ifdef KOAL_SSL_EXTENSION
+SSL_CTX *ssl_init(char *ssl_protocol, char *clientcert, char *clientkey,
+      char *cafile, char *capath) {
+#else /* KOAL_SSL_EXTENSION */
+SSL_CTX *ssl_init(char *clientcert, char *clientkey,
+      char *cafile, char *capath) {
+#endif /* KOAL_SSL_EXTENSION */
     SSL_CTX *ctx = NULL;
 
     SSL_load_error_strings();
@@ -38,15 +44,58 @@ SSL_CTX *ssl_init() {
         CRYPTO_set_locking_callback(ssl_lock);
         CRYPTO_set_id_callback(ssl_id);
 
+#ifdef KOAL_SSL_EXTENSION
+        if (strcmp(ssl_protocol, "ssl3") == 0)
+            ctx = SSL_CTX_new(SSLv3_client_method());
+#ifndef OPENSSL_NO_SSL2
+        else if (strcmp(ssl_protocol, "ssl2") == 0)
+            ctx = SSL_CTX_new(SSLv2_client_method());
+#endif
+#ifndef OPENSSL_NO_TLS1
+        else if (strcmp(ssl_protocol, "tls1") == 0)
+            ctx = SSL_CTX_new(TLSv1_client_method());
+        else if (strcmp(ssl_protocol, "tls1.1") == 0)
+            ctx = SSL_CTX_new(TLSv1_1_client_method());
+        else if (strcmp(ssl_protocol, "tls1.2") == 0)
+            ctx = SSL_CTX_new(TLSv1_2_client_method());
+#endif
+        else
+            ctx = SSL_CTX_new(SSLv23_client_method());
+        if (NULL != ctx) {
+#else /* KOAL_SSL_EXTENSION */
         if ((ctx = SSL_CTX_new(SSLv23_client_method()))) {
-            SSL_CTX_set_verify(ctx, SSL_VERIFY_NONE, NULL);
-            SSL_CTX_set_verify_depth(ctx, 0);
+#endif /* KOAL_SSL_EXTENSION */
+            if (!cafile && !capath) {
+                SSL_CTX_set_verify(ctx, SSL_VERIFY_NONE, NULL);
+                SSL_CTX_set_verify_depth(ctx, 0);
+            } else {
+                SSL_CTX_load_verify_locations(ctx, cafile, capath);
+            }
             SSL_CTX_set_mode(ctx, SSL_MODE_AUTO_RETRY);
             SSL_CTX_set_session_cache_mode(ctx, SSL_SESS_CACHE_CLIENT);
+
+            if (clientcert) {
+                if(1 != SSL_CTX_use_certificate_chain_file(ctx, clientcert)) {
+                    fprintf(stderr, "unable to load client certificate chain\n");
+                    return NULL;
+                }
+                if(1 != SSL_CTX_use_PrivateKey_file(
+                      ctx, clientkey, SSL_FILETYPE_PEM)) {
+                    fprintf(stderr, "unable to load client key\n");
+                    return NULL;
+                }
+            }
         }
     }
 
     return ctx;
+}
+
+status ssl_set_cipher_list(SSL_CTX *ctx, char *ciphers) {
+    if (SSL_CTX_set_cipher_list(ctx, ciphers) == 0) {
+        return ERROR;
+    }
+    return OK;
 }
 
 status ssl_connect(connection *c, char *host) {

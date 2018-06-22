@@ -3,8 +3,13 @@
 
 #include "net.h"
 
-SSL_CTX *ssl_init();
+#ifdef KOAL_SSL_EXTENSION
+SSL_CTX *ssl_init(char *, char *, char *, char*, char*);
+#else /* KOAL_SSL_EXTENSION */
+SSL_CTX *ssl_init(char *, char *, char*, char*);
+#endif /* KOAL_SSL_EXTENSION */
 
+status ssl_set_cipher_list(SSL_CTX *, char *);
 status ssl_connect(connection *, char *);
 status ssl_close(connection *);
 status ssl_read(connection *, size_t *);
