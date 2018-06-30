@@ -244,7 +244,6 @@ A note about wrk2's latency measurement technique:
   (The "uncorrected" distributions are labeled with "CO", for Coordinated
   Omission)
   
-  ![CO example]
   
   These differences can be seen in detail in the output provided when 
   the --u_latency flag is used. For example, the output below demonstrates
