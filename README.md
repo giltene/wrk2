@@ -46,6 +46,7 @@
 
   Output:
 
+  ```
   Running 5s test @ https://api.radius.com
   2 threads and 10 connections
   Thread Stats   Avg      Stdev     Max   +/- Stdev
@@ -93,6 +94,8 @@
   17 requests in 5.18s, 12.56KB read
 Requests/sec:      3.28
 Transfer/sec:      2.43KB
+
+```
 
 ## Scripting
 
