@@ -10,7 +10,7 @@
   per second) via either the --rate or -R parameters (default
   is 1000).
 
-  CRITICAL NOTE: Before going farther, I'd like to make it clear that
+  _CRITICAL NOTE_: Before going farther, I'd like to make it clear that
   this work is in no way intended to be an attack on or a disparagement
   of the great work that Will Glozer has done with wrk. I enjoyed working
   with his code, and I sincerely hope that some of the changes I had made
@@ -61,7 +61,7 @@
 
 ## Basic Usage
 
-    wrk -t2 -c100 -d30s -R2000 http://127.0.0.1:8080/index.html
+    wrk2 -t2 -c100 -d30s -R2000 http://127.0.0.1:8080/index.html
 
   This runs a benchmark for 30 seconds, using 2 threads, keeping
   100 HTTP connections open, and a constant throughput of 2000 requests
@@ -89,7 +89,7 @@
   imported to spreadsheets or gnuplot scripts and plotted per examples
   provided at http://hdrhistogram.org):
 
-    wrk -t2 -c100 -d30s -R2000 --latency http://127.0.0.1:80/index.html
+    wrk2 -t2 -c100 -d30s -R2000 --latency http://127.0.0.1:80/index.html
 
   Output:
 
@@ -372,7 +372,7 @@ A note about wrk2's latency measurement technique:
 
 Example 1: [short, non-noisy run (~11msec worst observed latency)]:
 
-    wrk -t2 -c100 -d30s -R2000 --u_latency http://127.0.0.1:80/index.html
+    wrk2 -t2 -c100 -d30s -R2000 --u_latency http://127.0.0.1:80/index.html
  
     Running 30s test @ http://127.0.0.1:80/index.html
       2 threads and 100 connections
@@ -584,7 +584,7 @@ Example 1: [short, non-noisy run (~11msec worst observed latency)]:
 
 Example 2: [1.4 second ^Z artifact introduced on the httpd server]:
  
-    wrk -t2 -c100 -d30s -R2000 --u_latency http://127.0.0.1:80/index.html
+    wrk2 -t2 -c100 -d30s -R2000 --u_latency http://127.0.0.1:80/index.html
  
     Running 30s test @ http://127.0.0.1:80/index.html
       2 threads and 100 connections
