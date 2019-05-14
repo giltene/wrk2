@@ -667,11 +667,12 @@ static void socket_readable(aeEventLoop *loop, int fd, void *data, int mask) {
         c->thread->bytes += n;
     } while (n == RECVBUF && sock.readable(c) > 0);
 
-    if (read_status == READ_EOF) goto error;
+    if (read_status == READ_EOF) goto reconnect;
     return;
 
   error:
     c->thread->errors.read++;
+  reconnect:
     reconnect_socket(c->thread, c);
 }
 
