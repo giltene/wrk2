@@ -415,7 +415,8 @@ static int script_thread_index(lua_State *L) {
     if (!strcmp("get",  key)) lua_pushcfunction(L, script_thread_get);
     if (!strcmp("set",  key)) lua_pushcfunction(L, script_thread_set);
     if (!strcmp("stop", key)) lua_pushcfunction(L, script_thread_stop);
-    if (!strcmp("addr", key)) script_addr_clone(L, t->addr);
+    if (!strcmp("addr", key)) { script_addr_clone(L, t->addr);
+                                if (t->reconnect_all) t->reconnect_all(t); }
     return 1;
 }
 
