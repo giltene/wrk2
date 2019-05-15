@@ -415,8 +415,7 @@ static int script_thread_index(lua_State *L) {
     if (!strcmp("get",  key)) lua_pushcfunction(L, script_thread_get);
     if (!strcmp("set",  key)) lua_pushcfunction(L, script_thread_set);
     if (!strcmp("stop", key)) lua_pushcfunction(L, script_thread_stop);
-    if (!strcmp("addr", key)) { script_addr_clone(L, t->addr);
-                                if (t->reconnect_all) t->reconnect_all(t); }
+    if (!strcmp("addr", key)) script_addr_clone(L, t->addr);
     return 1;
 }
 
@@ -428,6 +427,7 @@ static int script_thread_newindex(lua_State *L) {
         if (t->addr) zfree(t->addr->ai_addr);
         t->addr = zrealloc(t->addr, sizeof(*addr));
         script_addr_copy(addr, t->addr);
+        if (t->reconnect_all) t->reconnect_all(t);
     } else {
         luaL_error(L, "cannot set '%s' on thread", luaL_typename(L, -1));
     }

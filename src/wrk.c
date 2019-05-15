@@ -304,7 +304,7 @@ static void thread_reconnect_all(void *_t) {
     thread * t = (thread*)_t;
     connection *c = t->cs;
     for (uint64_t i = 0; i < t->connections; i++, c++) {
-        if (c && 0 <= c->fd) reconnect_socket(t, c);
+        if (c && 0 < c->fd) reconnect_socket(t, c);
     }
 }
 
