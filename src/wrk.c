@@ -85,6 +85,8 @@ int main(int argc, char **argv) {
         exit(1);
     }
 
+    printf("This is wrk2, w/ thread address setting support.\n");
+
     char *schema  = copy_url_part(url, &parts, UF_SCHEMA);
     char *host    = copy_url_part(url, &parts, UF_HOST);
     char *port    = copy_url_part(url, &parts, UF_PORT);
@@ -132,8 +134,7 @@ int main(int argc, char **argv) {
         t->connections = connections;
         t->throughput = throughput;
         t->stop_at     = stop_at;
-        t->reconnect_all = &thread_reconnect_all;
-        t->cs = NULL;
+        t->reconnect_all = NULL;
 
         t->L = script_create(cfg.script, url, headers);
         script_init(L, t, argc - optind, &argv[optind]);
@@ -284,6 +285,7 @@ void *thread_main(void *arg) {
         // Stagger connects 5 msec apart within thread:
         aeCreateTimeEvent(loop, i * 5, delayed_initial_connect, c, NULL);
     }
+    thread->reconnect_all = &thread_reconnect_all;
 
     uint64_t calibrate_delay = CALIBRATE_DELAY_MS + (thread->connections * 5);
     uint64_t timeout_delay = TIMEOUT_INTERVAL_MS + (thread->connections * 5);
