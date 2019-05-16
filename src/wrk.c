@@ -74,6 +74,8 @@ static void usage() {
            "  Time arguments may include a time unit (2s, 2m, 2h)\n");
 }
 
+static void thread_reconnect_all(void*);
+
 int main(int argc, char **argv) {
     char *url, **headers = zmalloc(argc * sizeof(char *));
     struct http_parser_url parts = {};
@@ -82,6 +84,8 @@ int main(int argc, char **argv) {
         usage();
         exit(1);
     }
+
+    printf("This is wrk2, w/ thread address setting support.\n");
 
     char *schema  = copy_url_part(url, &parts, UF_SCHEMA);
     char *host    = copy_url_part(url, &parts, UF_HOST);
@@ -130,6 +134,7 @@ int main(int argc, char **argv) {
         t->connections = connections;
         t->throughput = throughput;
         t->stop_at     = stop_at;
+        t->reconnect_all = NULL;
 
         t->L = script_create(cfg.script, url, headers);
         script_init(L, t, argc - optind, &argv[optind]);
@@ -268,6 +273,7 @@ void *thread_main(void *arg) {
     connection *c = thread->cs;
 
     for (uint64_t i = 0; i < thread->connections; i++, c++) {
+        c->fd         = -1;
         c->thread     = thread;
         c->ssl        = cfg.ctx ? SSL_new(cfg.ctx) : NULL;
         c->request    = request;
@@ -279,6 +285,7 @@ void *thread_main(void *arg) {
         // Stagger connects 5 msec apart within thread:
         aeCreateTimeEvent(loop, i * 5, delayed_initial_connect, c, NULL);
     }
+    thread->reconnect_all = &thread_reconnect_all;
 
     uint64_t calibrate_delay = CALIBRATE_DELAY_MS + (thread->connections * 5);
     uint64_t timeout_delay = TIMEOUT_INTERVAL_MS + (thread->connections * 5);
@@ -293,6 +300,14 @@ void *thread_main(void *arg) {
     zfree(thread->cs);
 
     return NULL;
+}
+
+static void thread_reconnect_all(void *_t) {
+    thread * t = (thread*)_t;
+    connection *c = t->cs;
+    for (uint64_t i = 0; i < t->connections; i++, c++) {
+        if (c && 0 < c->fd) reconnect_socket(t, c);
+    }
 }
 
 static int connect_socket(thread *thread, connection *c) {
