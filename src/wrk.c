@@ -85,8 +85,6 @@ int main(int argc, char **argv) {
         exit(1);
     }
 
-    printf("This is wrk2, w/ thread address setting support.\n");
-
     char *schema  = copy_url_part(url, &parts, UF_SCHEMA);
     char *host    = copy_url_part(url, &parts, UF_HOST);
     char *port    = copy_url_part(url, &parts, UF_PORT);
