@@ -7,6 +7,9 @@ ifeq ($(TARGET), sunos)
 	CFLAGS += -D_PTHREADS -D_POSIX_C_SOURCE=200112L
 	LIBS   += -lsocket
 else ifeq ($(TARGET), darwin)
+	# Per https://luajit.org/install.html: If MACOSX_DEPLOYMENT_TARGET
+	# is not set then it's forced to 10.4, which breaks compile on Mojave.
+	export MACOSX_DEPLOYMENT_TARGET = $(shell sw_vers -productVersion)
 	LDFLAGS += -pagezero_size 10000 -image_base 100000000
 	LIBS += -L/usr/local/opt/openssl/lib
 	CFLAGS += -I/usr/local/include -I/usr/local/opt/openssl/include
