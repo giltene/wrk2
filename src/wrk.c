@@ -10,17 +10,18 @@
 #define MAX_LATENCY 24L * 60 * 60 * 1000000
 
 static struct config {
-    uint64_t threads;
     uint64_t connections;
     uint64_t duration;
+    uint64_t threads;
     uint64_t timeout;
     uint64_t pipeline;
     uint64_t rate;
     uint64_t delay_ms;
-    bool     latency;
-    bool     u_latency;
+    bool     delay;
     bool     dynamic;
+    bool     latency;
     bool     record_all_responses;
+    bool     u_latency;
     char    *host;
     char    *script;
     SSL_CTX *ctx;
@@ -137,6 +138,7 @@ int main(int argc, char **argv) {
         if (i == 0) {
             cfg.pipeline = script_verify_request(t->L);
             cfg.dynamic = !script_is_static(t->L);
+            cfg.delay    = script_has_delay(t->L);
             if (script_want_response(t->L)) {
                 parser_settings.on_header_field = header_field;
                 parser_settings.on_header_value = header_value;
@@ -272,6 +274,7 @@ void *thread_main(void *arg) {
         c->ssl        = cfg.ctx ? SSL_new(cfg.ctx) : NULL;
         c->request    = request;
         c->length     = length;
+        c->delayed = cfg.delay;
         c->throughput = throughput;
         c->catch_up_throughput = throughput * 2;
         c->complete   = 0;
@@ -473,6 +476,7 @@ static uint64_t usec_to_next_send(connection *c) {
 
 static int delay_request(aeEventLoop *loop, long long id, void *data) {
     connection* c = data;
+    c->delayed = false;
     uint64_t time_usec_to_wait = usec_to_next_send(c);
     if (time_usec_to_wait) {
         return round((time_usec_to_wait / 1000.0L) + 0.5); /* don't send, wait */
@@ -547,6 +551,7 @@ static int response_complete(http_parser *parser) {
 
     if (--c->pending == 0) {
         c->has_pending = false;
+        c->delayed = cfg.delay;
         aeCreateFileEvent(thread->loop, c->fd, AE_WRITABLE, socket_writeable, c);
     }
 
@@ -597,6 +602,13 @@ static void socket_connected(aeEventLoop *loop, int fd, void *data, int mask) {
 static void socket_writeable(aeEventLoop *loop, int fd, void *data, int mask) {
     connection *c = data;
     thread *thread = c->thread;
+
+    if (c->delayed) {
+        uint64_t delay = script_delay(thread->L);
+        aeDeleteFileEvent(loop, fd, AE_WRITABLE);
+        aeCreateTimeEvent(loop, delay, delay_request, c, NULL);
+        return;
+    }
 
     if (!c->written) {
         uint64_t time_usec_to_wait = usec_to_next_send(c);
@@ -662,6 +674,8 @@ static void socket_readable(aeEventLoop *loop, int fd, void *data, int mask) {
         }
 
         if (http_parser_execute(&c->parser, &parser_settings, c->buf, n) != n) goto error;
+        if (n == 0 && !http_body_is_final(&c->parser)) goto error;
+
         c->thread->bytes += n;
     } while (n == RECVBUF && sock.readable(c) > 0);
 

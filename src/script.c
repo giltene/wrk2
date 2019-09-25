@@ -27,19 +27,19 @@ static void set_fields(lua_State *, int, const table_field *);
 static void set_field(lua_State *, int, char *, int);
 static int push_url_part(lua_State *, char *, struct http_parser_url *, enum http_parser_url_fields);
 
-static const struct luaL_reg addrlib[] = {
+static const struct luaL_Reg addrlib[] = {
     { "__tostring", script_addr_tostring   },
     { "__gc"    ,   script_addr_gc         },
     { NULL,         NULL                   }
 };
 
-static const struct luaL_reg statslib[] = {
+static const struct luaL_Reg statslib[] = {
     { "__index",    script_stats_get       },
     { "__len",      script_stats_len       },
     { NULL,         NULL                   }
 };
 
-static const struct luaL_reg threadlib[] = {
+static const struct luaL_Reg threadlib[] = {
     { "__index",    script_thread_index    },
     { "__newindex", script_thread_newindex },
     { NULL,         NULL                   }
@@ -142,6 +142,14 @@ void script_init(lua_State *L, thread *t, int argc, char **argv) {
     lua_pop(t->L, 1);
 }
 
+uint64_t script_delay(lua_State *L) {
+    lua_getglobal(L, "delay");
+    lua_call(L, 0, 1);
+    uint64_t delay = lua_tonumber(L, -1);
+    lua_pop(L, 1);
+    return delay;
+}
+
 void script_request(lua_State *L, char **buf, size_t *len) {
     int pop = 1;
     lua_getglobal(L, "request");
@@ -188,6 +196,10 @@ bool script_is_static(lua_State *L) {
 
 bool script_want_response(lua_State *L) {
     return script_is_function(L, "response");
+}
+
+bool script_has_delay(lua_State *L) {
+    return script_is_function(L, "delay");
 }
 
 bool script_has_done(lua_State *L) {
