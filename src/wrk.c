@@ -23,6 +23,14 @@ static struct config {
     bool     record_all_responses;
     char    *host;
     char    *script;
+    char    *clientcert;
+    char    *clientkey;
+    char    *cafile;
+    char    *capath;
+    char    *ciphers;
+#ifdef KOAL_SSL_EXTENSION
+    char    *protocol;
+#endif /* KOAL_SSL_EXTENSION */
     SSL_CTX *ctx;
 } cfg;
 
@@ -57,10 +65,18 @@ static void usage() {
            "    -t, --threads     <N>  Number of threads to use   \n"
            "                                                      \n"
            "    -s, --script      <S>  Load Lua script file       \n"
+           "    -z, --ciphers     <S>  Specify SSL/TLS ciphers    \n"
+#ifdef KOAL_SSL_EXTENSION
+           "    -p, --protocol    <S>  Specify SSL/TLS protocol   \n"
+#endif /* KOAL_SSL_EXTENSION */
            "    -H, --header      <H>  Add header to request      \n"
            "    -L  --latency          Print latency statistics   \n"
            "    -U  --u_latency        Print uncorrected latency statistics\n"
            "        --timeout     <T>  Socket/request timeout     \n"
+           "    -C  --clientcert  <C>  SSL client PEM cert chain  \n"
+           "    -K  --clientkey   <K>  SSL client PEM key file    \n"
+           "    -F  --cafile      <F>  SSL trusted CAs PEM file   \n"
+           "    -P  --capath      <P>  SSL trusted CAs directory  \n"
            "    -B, --batch_latency    Measure latency of whole   \n"
            "                           batches of pipelined ops   \n"
            "                           (as opposed to each op)    \n"
@@ -89,7 +105,17 @@ int main(int argc, char **argv) {
     char *service = port ? port : schema;
 
     if (!strncmp("https", schema, 5)) {
-        if ((cfg.ctx = ssl_init()) == NULL) {
+#ifdef KOAL_SSL_EXTENSION
+        if (NULL == cfg.protocol) {
+          cfg.protocol = "all";
+        }
+
+        if ((cfg.ctx = ssl_init(cfg.protocol, cfg.clientcert,
+                cfg.clientkey, cfg.cafile, cfg.capath)) == NULL) {
+#else /* KOAL_SSL_EXTENSION */
+        if ((cfg.ctx = ssl_init(cfg.clientcert, cfg.clientkey,
+                  cfg.cafile, cfg.capath)) == NULL) {
+#endif /* KOAL_SSL_EXTENSION */
             fprintf(stderr, "unable to initialize SSL\n");
             ERR_print_errors_fp(stderr);
             exit(1);
@@ -696,11 +722,19 @@ static struct option longopts[] = {
     { "duration",       required_argument, NULL, 'd' },
     { "threads",        required_argument, NULL, 't' },
     { "script",         required_argument, NULL, 's' },
+    { "ciphers",        required_argument, NULL, 'z' },
+#ifdef KOAL_SSL_EXTENSION
+    { "protocol",       required_argument, NULL, 'p' },
+#endif /* KOAL_SSL_EXTENSION */
     { "header",         required_argument, NULL, 'H' },
     { "latency",        no_argument,       NULL, 'L' },
     { "u_latency",      no_argument,       NULL, 'U' },
     { "batch_latency",  no_argument,       NULL, 'B' },
     { "timeout",        required_argument, NULL, 'T' },
+    { "clientcert",     required_argument, NULL, 'C' },
+    { "clientkey",      required_argument, NULL, 'K' },
+    { "cafile",         required_argument, NULL, 'F' },
+    { "capath",         required_argument, NULL, 'P' },
     { "help",           no_argument,       NULL, 'h' },
     { "version",        no_argument,       NULL, 'v' },
     { "rate",           required_argument, NULL, 'R' },
@@ -732,6 +766,26 @@ static int parse_args(struct config *cfg, char **url, struct http_parser_url *pa
             case 's':
                 cfg->script = optarg;
                 break;
+            case 'C':
+                cfg->clientcert = optarg;
+                break;
+            case 'K':
+                cfg->clientkey = optarg;
+                break;
+            case 'F':
+                cfg->cafile = optarg;
+                break;
+            case 'P':
+                cfg->capath = optarg;
+                break;
+            case 'z':
+                cfg->ciphers = optarg;
+                break;
+#ifdef KOAL_SSL_EXTENSION
+            case 'p':
+                cfg->protocol = optarg;
+                break;
+#endif /* KOAL_SSL_EXTENSION */
             case 'H':
                 *header++ = optarg;
                 break;
