@@ -17,7 +17,8 @@ status sock_close(connection *c) {
 status sock_read(connection *c, size_t *n) {
     ssize_t r = read(c->fd, c->buf, sizeof(c->buf));
     *n = (size_t) r;
-    return r >= 0 ? OK : ERROR;
+    if (r == 0) return READ_EOF;
+    return r > 0 ? OK : ERROR;
 }
 
 status sock_write(connection *c, char *buf, size_t len, size_t *n) {

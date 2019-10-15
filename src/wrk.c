@@ -653,18 +653,21 @@ static void socket_writeable(aeEventLoop *loop, int fd, void *data, int mask) {
 static void socket_readable(aeEventLoop *loop, int fd, void *data, int mask) {
     connection *c = data;
     size_t n;
+    int read_status = OK;
 
     do {
-        switch (sock.read(c, &n)) {
+        switch (read_status = sock.read(c, &n)) {
             case OK:    break;
             case ERROR: goto error;
             case RETRY: return;
+            case READ_EOF: break;
         }
 
         if (http_parser_execute(&c->parser, &parser_settings, c->buf, n) != n) goto error;
         c->thread->bytes += n;
     } while (n == RECVBUF && sock.readable(c) > 0);
 
+    if (read_status == READ_EOF) goto error;
     return;
 
   error:
