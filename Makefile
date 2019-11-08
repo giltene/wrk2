@@ -17,6 +17,10 @@ else ifeq ($(TARGET), linux)
         CFLAGS  += -D_POSIX_C_SOURCE=200809L -D_BSD_SOURCE
 	LIBS    += -ldl
 	LDFLAGS += -Wl,-E
+	ifneq ($(OPENSSL_HOME), )
+		CFLAGS  += -I$(OPENSSL_HOME)/include
+		LDFLAGS += -L$(OPENSSL_HOME)/lib
+	endif
 else ifeq ($(TARGET), freebsd)
 	CFLAGS  += -D_DECLARE_C99_LDBL_MATH
 	LDFLAGS += -Wl,-E
