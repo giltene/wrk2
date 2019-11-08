@@ -18,7 +18,7 @@ else ifeq ($(TARGET), linux)
 	LIBS    += -ldl
 	LDFLAGS += -Wl,-E
 	ifneq ($(OPENSSL_HOME), )
-		CFLAGS  += -I$(OPENSSL_HOME)/include/openssl
+		CFLAGS  += -I$(OPENSSL_HOME)/include
 		LDFLAGS += -L$(OPENSSL_HOME)/lib
 	endif
 else ifeq ($(TARGET), freebsd)
