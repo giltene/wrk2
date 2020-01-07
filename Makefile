@@ -1,4 +1,4 @@
-CFLAGS  := -std=c99 -Wall -O2 -D_REENTRANT
+CFLAGS  := -std=c99 -Wall -O2 -D_REENTRANT -MD
 LIBS    := -lpthread -lm -lcrypto -lssl
 
 TARGET  := $(shell uname -s | tr '[A-Z]' '[a-z]' 2>/dev/null || echo unknown)
@@ -22,6 +22,8 @@ else ifeq ($(TARGET), freebsd)
 	LDFLAGS += -Wl,-E
 endif
 
+DEPS=$(wildcard *.d)
+
 SRC  := wrk.c net.c ssl.c aprintf.c stats.c script.c units.c \
 		ae.c zmalloc.c http_parser.c tinymt64.c hdr_histogram.c
 BIN  := wrk
@@ -37,7 +39,7 @@ LDFLAGS += -L$(LDIR)
 all: $(BIN)
 
 clean:
-	$(RM) $(BIN) obj/*
+	$(RM) $(BIN) obj/* $(DEPS)
 	@$(MAKE) -C deps/luajit clean
 
 $(BIN): $(OBJ)
@@ -68,3 +70,4 @@ $(LDIR)/libluajit.a:
 vpath %.c   src
 vpath %.h   src
 vpath %.lua scripts
+-include $(OBJ:.o=.d)
