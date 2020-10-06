@@ -23,6 +23,9 @@ static struct config {
     bool     record_all_responses;
     char    *host;
     char    *script;
+    char    *ca;
+    char    *cert;
+    char    *key;
     SSL_CTX *ctx;
 } cfg;
 
@@ -68,6 +71,9 @@ static void usage() {
            "    -R, --rate        <T>  work rate (throughput)     \n"
            "                           in requests/sec (total)    \n"
            "                           [Required Parameter]       \n"
+           "    -A, --cacert      <S>  CA certificate file        \n"
+           "    -C, --cert        <S>  Client certificate file    \n"
+           "    -K, --key         <S>  Client key file            \n"
            "                                                      \n"
            "                                                      \n"
            "  Numeric arguments may include a SI unit (1k, 1M, 1G)\n"
@@ -89,7 +95,7 @@ int main(int argc, char **argv) {
     char *service = port ? port : schema;
 
     if (!strncmp("https", schema, 5)) {
-        if ((cfg.ctx = ssl_init()) == NULL) {
+        if ((cfg.ctx = ssl_init(cfg.ca, cfg.cert, cfg.key)) == NULL) {
             fprintf(stderr, "unable to initialize SSL\n");
             ERR_print_errors_fp(stderr);
             exit(1);
@@ -207,7 +213,7 @@ int main(int argc, char **argv) {
     print_stats_header();
     print_stats("Latency", latency_stats, format_time_us);
     print_stats("Req/Sec", statistics.requests, format_metric);
-//    if (cfg.latency) print_stats_latency(latency_stats);
+    // if (cfg.latency) print_stats_latency(latency_stats);
 
     if (cfg.latency) {
         print_hdr_latency(latency_histogram,
@@ -526,20 +532,19 @@ static int response_complete(http_parser *parser) {
         printf("This wil never ever ever happen...");
         printf("But when it does. The following information will help in debugging");
         printf("response_complete:\n");
-        printf("  expected_latency_timing = %lld\n", expected_latency_timing);
-        printf("  now = %lld\n", now);
-        printf("  expected_latency_start = %lld\n", expected_latency_start);
-        printf("  c->thread_start = %lld\n", c->thread_start);
-        printf("  c->complete = %lld\n", c->complete);
+        printf("  expected_latency_timing = %"PRIu64"\n", expected_latency_timing);
+        printf("  now = %"PRIu64"\n", now);
+        printf("  expected_latency_start = %"PRIu64"\n", expected_latency_start);
+        printf("  c->thread_start = %"PRIu64"\n", c->thread_start);
+        printf("  c->complete = %"PRIu64"\n", c->complete);
         printf("  throughput = %g\n", c->throughput);
-        printf("  latest_should_send_time = %lld\n", c->latest_should_send_time);
-        printf("  latest_expected_start = %lld\n", c->latest_expected_start);
-        printf("  latest_connect = %lld\n", c->latest_connect);
-        printf("  latest_write = %lld\n", c->latest_write);
+        printf("  latest_should_send_time = %"PRIu64"\n", c->latest_should_send_time);
+        printf("  latest_expected_start = %"PRIu64"\n", c->latest_expected_start);
+        printf("  latest_connect = %"PRIu64"\n", c->latest_connect);
+        printf("  latest_write = %"PRIu64"\n", c->latest_write);
 
-        expected_latency_start = c->thread_start +
-                ((c->complete ) / c->throughput);
-        printf("  next expected_latency_start = %lld\n", expected_latency_start);
+        expected_latency_start = c->thread_start + ((c->complete ) / c->throughput);
+        printf("  next expected_latency_start = %"PRIu64"\n", expected_latency_start);
     }
 
     c->latest_should_send_time = 0;
@@ -696,6 +701,9 @@ static struct option longopts[] = {
     { "duration",       required_argument, NULL, 'd' },
     { "threads",        required_argument, NULL, 't' },
     { "script",         required_argument, NULL, 's' },
+    { "cacert",         required_argument, NULL, 'A' },
+    { "cert",           required_argument, NULL, 'C' },
+    { "key",            required_argument, NULL, 'K' },
     { "header",         required_argument, NULL, 'H' },
     { "latency",        no_argument,       NULL, 'L' },
     { "u_latency",      no_argument,       NULL, 'U' },
@@ -718,7 +726,7 @@ static int parse_args(struct config *cfg, char **url, struct http_parser_url *pa
     cfg->rate        = 0;
     cfg->record_all_responses = true;
 
-    while ((c = getopt_long(argc, argv, "t:c:d:s:H:T:R:LUBrv?", longopts, NULL)) != -1) {
+    while ((c = getopt_long(argc, argv, "t:c:d:s:A:C:K:H:T:R:LUBrv?", longopts, NULL)) != -1) {
         switch (c) {
             case 't':
                 if (scan_metric(optarg, &cfg->threads)) return -1;
@@ -731,6 +739,15 @@ static int parse_args(struct config *cfg, char **url, struct http_parser_url *pa
                 break;
             case 's':
                 cfg->script = optarg;
+                break;
+            case 'A':
+                cfg->ca = optarg;
+                break;
+            case 'C':
+                cfg->cert = optarg;
+                break;
+            case 'K':
+                cfg->key = optarg;
                 break;
             case 'H':
                 *header++ = optarg;

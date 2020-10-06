@@ -23,7 +23,7 @@ static unsigned long ssl_id() {
     return (unsigned long) pthread_self();
 }
 
-SSL_CTX *ssl_init() {
+SSL_CTX *ssl_init(const char *ca, const char *cert, const char *key) {
     SSL_CTX *ctx = NULL;
 
     SSL_load_error_strings();
@@ -43,6 +43,30 @@ SSL_CTX *ssl_init() {
             SSL_CTX_set_verify_depth(ctx, 0);
             SSL_CTX_set_mode(ctx, SSL_MODE_AUTO_RETRY);
             SSL_CTX_set_session_cache_mode(ctx, SSL_SESS_CACHE_CLIENT);
+
+            if (ca) {
+                if (SSL_CTX_load_verify_locations(ctx, ca, NULL) < 1) {
+                    ERR_print_errors_fp(stderr);
+                    exit(EXIT_FAILURE);
+                }
+                SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
+            }
+            if (cert) {
+                if (SSL_CTX_use_certificate_file(ctx, cert, SSL_FILETYPE_PEM) <= 0) {
+                    ERR_print_errors_fp(stderr);
+                    exit(EXIT_FAILURE);
+                }
+            }
+            if (key) {
+                if (SSL_CTX_use_PrivateKey_file(ctx, key, SSL_FILETYPE_PEM) <= 0) {
+                    ERR_print_errors_fp(stderr);
+                    exit(EXIT_FAILURE);
+                }
+                if (SSL_CTX_check_private_key(ctx) == 0) {
+                    fprintf(stderr, "Private key does not match the certificate public key\n");
+                    exit(EXIT_FAILURE);
+                }
+            }
         }
     }
 
