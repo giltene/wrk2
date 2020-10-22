@@ -21,6 +21,7 @@ static struct config {
     bool     u_latency;
     bool     dynamic;
     bool     record_all_responses;
+    bool     uniform;
     char    *host;
     char    *script;
     SSL_CTX *ctx;
@@ -64,6 +65,7 @@ static void usage() {
            "    -B, --batch_latency    Measure latency of whole   \n"
            "                           batches of pipelined ops   \n"
            "                           (as opposed to each op)    \n"
+           "    -u, --uniform          Distribute requests uniformly in time\n"
            "    -v, --version          Print version details      \n"
            "    -R, --rate        <T>  work rate (throughput)     \n"
            "                           in requests/sec (total)    \n"
@@ -267,6 +269,10 @@ void *thread_main(void *arg) {
 
     connection *c = thread->cs;
 
+    uint64_t step = 5;
+    if (cfg.uniform) {
+        step = 1000 / thread->throughput;
+    }
     for (uint64_t i = 0; i < thread->connections; i++, c++) {
         c->thread     = thread;
         c->ssl        = cfg.ctx ? SSL_new(cfg.ctx) : NULL;
@@ -276,12 +282,12 @@ void *thread_main(void *arg) {
         c->catch_up_throughput = throughput * 2;
         c->complete   = 0;
         c->caught_up  = true;
-        // Stagger connects 5 msec apart within thread:
-        aeCreateTimeEvent(loop, i * 5, delayed_initial_connect, c, NULL);
+        // Stagger connects <step> msec apart within thread:
+        aeCreateTimeEvent(loop, i * step, delayed_initial_connect, c, NULL);
     }
 
-    uint64_t calibrate_delay = CALIBRATE_DELAY_MS + (thread->connections * 5);
-    uint64_t timeout_delay = TIMEOUT_INTERVAL_MS + (thread->connections * 5);
+    uint64_t calibrate_delay = CALIBRATE_DELAY_MS + (thread->connections * step);
+    uint64_t timeout_delay = TIMEOUT_INTERVAL_MS + (thread->connections * step);
 
     aeCreateTimeEvent(loop, calibrate_delay, calibrate, thread, NULL);
     aeCreateTimeEvent(loop, timeout_delay, check_timeouts, thread, NULL);
@@ -704,6 +710,7 @@ static struct option longopts[] = {
     { "help",           no_argument,       NULL, 'h' },
     { "version",        no_argument,       NULL, 'v' },
     { "rate",           required_argument, NULL, 'R' },
+    { "uniform",        no_argument,       NULL, 'u' },
     { NULL,             0,                 NULL,  0  }
 };
 
@@ -718,7 +725,7 @@ static int parse_args(struct config *cfg, char **url, struct http_parser_url *pa
     cfg->rate        = 0;
     cfg->record_all_responses = true;
 
-    while ((c = getopt_long(argc, argv, "t:c:d:s:H:T:R:LUBrv?", longopts, NULL)) != -1) {
+    while ((c = getopt_long(argc, argv, "t:c:d:us:H:T:R:LUBrv?", longopts, NULL)) != -1) {
         switch (c) {
             case 't':
                 if (scan_metric(optarg, &cfg->threads)) return -1;
@@ -744,6 +751,9 @@ static int parse_args(struct config *cfg, char **url, struct http_parser_url *pa
             case 'U':
                 cfg->latency = true;
                 cfg->u_latency = true;
+                break;
+            case 'u':
+                cfg->uniform = true;
                 break;
             case 'T':
                 if (scan_time(optarg, &cfg->timeout)) return -1;
