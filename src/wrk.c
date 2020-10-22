@@ -710,6 +710,7 @@ static struct option longopts[] = {
     { "help",           no_argument,       NULL, 'h' },
     { "version",        no_argument,       NULL, 'v' },
     { "rate",           required_argument, NULL, 'R' },
+    { "uniform",        no_argument,       NULL, 'u' },
     { NULL,             0,                 NULL,  0  }
 };
 
