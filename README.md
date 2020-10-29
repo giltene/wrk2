@@ -3,7 +3,7 @@
 
   **a HTTP benchmarking tool based mostly on wrk**
 
-  wrk2 is wrk modifed to produce a constant throughput load, and
+  wrk2 is wrk modified to produce a constant throughput load, and
   accurate latency details to the high 9s (i.e. can produce
   accurate 99.9999%'ile when run long enough). In addition to
   wrk's arguments, wrk2 takes a throughput argument (in total requests
@@ -46,7 +46,7 @@
 
   The remaining part of the README is wrk's, with minor changes to
   reflect additional parameter and output. There is an important and
-  detailed note at the end about about wrk2's latency measurement
+  detailed note at the end about wrk2's latency measurement
   technique, including a discussion of Coordinated Omission, how
   wrk2 avoids it, and detailed output that demonstrates it.
 
