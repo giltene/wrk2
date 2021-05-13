@@ -1,6 +1,6 @@
 /*
 ** FFI C library loader.
-** Copyright (C) 2005-2014 Mike Pall. See Copyright Notice in luajit.h
+** Copyright (C) 2005-2021 Mike Pall. See Copyright Notice in luajit.h
 */
 
 #include "lj_obj.h"
@@ -16,6 +16,7 @@
 #include "lj_cconv.h"
 #include "lj_cdata.h"
 #include "lj_clib.h"
+#include "lj_strfmt.h"
 
 /* -- OS-specific functions ----------------------------------------------- */
 
@@ -39,7 +40,7 @@ LJ_NORET LJ_NOINLINE static void clib_error_(lua_State *L)
 
 #define clib_error(L, fmt, name)	clib_error_(L)
 
-#if defined(__CYGWIN__)
+#if LJ_TARGET_CYGWIN
 #define CLIB_SOPREFIX	"cyg"
 #else
 #define CLIB_SOPREFIX	"lib"
@@ -47,7 +48,7 @@ LJ_NORET LJ_NOINLINE static void clib_error_(lua_State *L)
 
 #if LJ_TARGET_OSX
 #define CLIB_SOEXT	"%s.dylib"
-#elif defined(__CYGWIN__)
+#elif LJ_TARGET_CYGWIN
 #define CLIB_SOEXT	"%s.dll"
 #else
 #define CLIB_SOEXT	"%s.so"
@@ -56,21 +57,21 @@ LJ_NORET LJ_NOINLINE static void clib_error_(lua_State *L)
 static const char *clib_extname(lua_State *L, const char *name)
 {
   if (!strchr(name, '/')
-#ifdef __CYGWIN__
+#if LJ_TARGET_CYGWIN
       && !strchr(name, '\\')
 #endif
      ) {
     if (!strchr(name, '.')) {
-      name = lj_str_pushf(L, CLIB_SOEXT, name);
+      name = lj_strfmt_pushf(L, CLIB_SOEXT, name);
       L->top--;
-#ifdef __CYGWIN__
+#if LJ_TARGET_CYGWIN
     } else {
       return name;
 #endif
     }
     if (!(name[0] == CLIB_SOPREFIX[0] && name[1] == CLIB_SOPREFIX[1] &&
 	  name[2] == CLIB_SOPREFIX[2])) {
-      name = lj_str_pushf(L, CLIB_SOPREFIX "%s", name);
+      name = lj_strfmt_pushf(L, CLIB_SOPREFIX "%s", name);
       L->top--;
     }
   }
@@ -118,12 +119,13 @@ static void *clib_loadlib(lua_State *L, const char *name, int global)
 		   RTLD_LAZY | (global?RTLD_GLOBAL:RTLD_LOCAL));
   if (!h) {
     const char *e, *err = dlerror();
-    if (*err == '/' && (e = strchr(err, ':')) &&
+    if (err && *err == '/' && (e = strchr(err, ':')) &&
 	(name = clib_resolve_lds(L, strdata(lj_str_new(L, err, e-err))))) {
       h = dlopen(name, RTLD_LAZY | (global?RTLD_GLOBAL:RTLD_LOCAL));
       if (h) return h;
       err = dlerror();
     }
+    if (!err) err = "dlopen failed";
     lj_err_callermsg(L, err);
   }
   return h;
@@ -157,11 +159,13 @@ BOOL WINAPI GetModuleHandleExA(DWORD, LPCSTR, HMODULE*);
 /* Default libraries. */
 enum {
   CLIB_HANDLE_EXE,
+#if !LJ_TARGET_UWP
   CLIB_HANDLE_DLL,
   CLIB_HANDLE_CRT,
   CLIB_HANDLE_KERNEL32,
   CLIB_HANDLE_USER32,
   CLIB_HANDLE_GDI32,
+#endif
   CLIB_HANDLE_MAX
 };
 
@@ -171,11 +175,19 @@ LJ_NORET LJ_NOINLINE static void clib_error(lua_State *L, const char *fmt,
 					    const char *name)
 {
   DWORD err = GetLastError();
+#if LJ_TARGET_XBOXONE
+  wchar_t wbuf[128];
+  char buf[128*2];
+  if (!FormatMessageW(FORMAT_MESSAGE_IGNORE_INSERTS|FORMAT_MESSAGE_FROM_SYSTEM,
+		      NULL, err, 0, wbuf, sizeof(wbuf)/sizeof(wchar_t), NULL) ||
+      !WideCharToMultiByte(CP_ACP, 0, wbuf, 128, buf, 128*2, NULL, NULL))
+#else
   char buf[128];
   if (!FormatMessageA(FORMAT_MESSAGE_IGNORE_INSERTS|FORMAT_MESSAGE_FROM_SYSTEM,
 		      NULL, err, 0, buf, sizeof(buf), NULL))
+#endif
     buf[0] = '\0';
-  lj_err_callermsg(L, lj_str_pushf(L, fmt, name, buf));
+  lj_err_callermsg(L, lj_strfmt_pushf(L, fmt, name, buf));
 }
 
 static int clib_needext(const char *s)
@@ -190,7 +202,7 @@ static int clib_needext(const char *s)
 static const char *clib_extname(lua_State *L, const char *name)
 {
   if (clib_needext(name)) {
-    name = lj_str_pushf(L, "%s.dll", name);
+    name = lj_strfmt_pushf(L, "%s.dll", name);
     L->top--;
   }
   return name;
@@ -199,7 +211,7 @@ static const char *clib_extname(lua_State *L, const char *name)
 static void *clib_loadlib(lua_State *L, const char *name, int global)
 {
   DWORD oldwerr = GetLastError();
-  void *h = (void *)LoadLibraryA(clib_extname(L, name));
+  void *h = LJ_WIN_LOADLIBA(clib_extname(L, name));
   if (!h) clib_error(L, "cannot load module " LUA_QS ": %s", name);
   SetLastError(oldwerr);
   UNUSED(global);
@@ -209,6 +221,7 @@ static void *clib_loadlib(lua_State *L, const char *name, int global)
 static void clib_unloadlib(CLibrary *cl)
 {
   if (cl->handle == CLIB_DEFHANDLE) {
+#if !LJ_TARGET_UWP
     MSize i;
     for (i = CLIB_HANDLE_KERNEL32; i < CLIB_HANDLE_MAX; i++) {
       void *h = clib_def_handle[i];
@@ -217,10 +230,15 @@ static void clib_unloadlib(CLibrary *cl)
 	FreeLibrary((HINSTANCE)h);
       }
     }
+#endif
   } else if (cl->handle) {
     FreeLibrary((HINSTANCE)cl->handle);
   }
 }
+
+#if LJ_TARGET_UWP
+EXTERN_C IMAGE_DOS_HEADER __ImageBase;
+#endif
 
 static void *clib_getsym(CLibrary *cl, const char *name)
 {
@@ -230,6 +248,9 @@ static void *clib_getsym(CLibrary *cl, const char *name)
     for (i = 0; i < CLIB_HANDLE_MAX; i++) {
       HINSTANCE h = (HINSTANCE)clib_def_handle[i];
       if (!(void *)h) {  /* Resolve default library handles (once). */
+#if LJ_TARGET_UWP
+	h = (HINSTANCE)&__ImageBase;
+#else
 	switch (i) {
 	case CLIB_HANDLE_EXE: GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, NULL, &h); break;
 	case CLIB_HANDLE_DLL:
@@ -240,11 +261,12 @@ static void *clib_getsym(CLibrary *cl, const char *name)
 	  GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
 			     (const char *)&_fmode, &h);
 	  break;
-	case CLIB_HANDLE_KERNEL32: h = LoadLibraryA("kernel32.dll"); break;
-	case CLIB_HANDLE_USER32: h = LoadLibraryA("user32.dll"); break;
-	case CLIB_HANDLE_GDI32: h = LoadLibraryA("gdi32.dll"); break;
+	case CLIB_HANDLE_KERNEL32: h = LJ_WIN_LOADLIBA("kernel32.dll"); break;
+	case CLIB_HANDLE_USER32: h = LJ_WIN_LOADLIBA("user32.dll"); break;
+	case CLIB_HANDLE_GDI32: h = LJ_WIN_LOADLIBA("gdi32.dll"); break;
 	}
 	if (!h) continue;
+#endif
 	clib_def_handle[i] = (void *)h;
       }
       p = (void *)GetProcAddress(h, name);
@@ -263,7 +285,7 @@ static void *clib_getsym(CLibrary *cl, const char *name)
 LJ_NORET LJ_NOINLINE static void clib_error(lua_State *L, const char *fmt,
 					    const char *name)
 {
-  lj_err_callermsg(L, lj_str_pushf(L, fmt, name, "no support for this OS"));
+  lj_err_callermsg(L, lj_strfmt_pushf(L, fmt, name, "no support for this OS"));
 }
 
 static void *clib_loadlib(lua_State *L, const char *name, int global)
@@ -328,7 +350,8 @@ TValue *lj_clib_index(lua_State *L, CLibrary *cl, GCstr *name)
       lj_err_callerv(L, LJ_ERR_FFI_NODECL, strdata(name));
     if (ctype_isconstval(ct->info)) {
       CType *ctt = ctype_child(cts, ct);
-      lua_assert(ctype_isinteger(ctt->info) && ctt->size <= 4);
+      lj_assertCTS(ctype_isinteger(ctt->info) && ctt->size <= 4,
+		   "only 32 bit const supported");  /* NYI */
       if ((ctt->info & CTF_UNSIGNED) && (int32_t)ct->size < 0)
 	setnumV(tv, (lua_Number)(uint32_t)ct->size);
       else
@@ -340,14 +363,15 @@ TValue *lj_clib_index(lua_State *L, CLibrary *cl, GCstr *name)
 #endif
       void *p = clib_getsym(cl, sym);
       GCcdata *cd;
-      lua_assert(ctype_isfunc(ct->info) || ctype_isextern(ct->info));
+      lj_assertCTS(ctype_isfunc(ct->info) || ctype_isextern(ct->info),
+		   "unexpected ctype %08x in clib", ct->info);
 #if LJ_TARGET_X86 && LJ_ABI_WIN
       /* Retry with decorated name for fastcall/stdcall functions. */
       if (!p && ctype_isfunc(ct->info)) {
 	CTInfo cconv = ctype_cconv(ct->info);
 	if (cconv == CTCC_FASTCALL || cconv == CTCC_STDCALL) {
 	  CTSize sz = clib_func_argsize(cts, ct);
-	  const char *symd = lj_str_pushf(L,
+	  const char *symd = lj_strfmt_pushf(L,
 			       cconv == CTCC_FASTCALL ? "@%s@%d" : "_%s@%d",
 			       sym, sz);
 	  L->top--;
@@ -363,6 +387,7 @@ TValue *lj_clib_index(lua_State *L, CLibrary *cl, GCstr *name)
       cd = lj_cdata_new(cts, id, CTSIZE_PTR);
       *(void **)cdataptr(cd) = p;
       setcdataV(L, tv, cd);
+      lj_gc_anybarriert(L, cl->cache);
     }
   }
   return tv;

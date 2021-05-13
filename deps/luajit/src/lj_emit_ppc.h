@@ -1,6 +1,6 @@
 /*
 ** PPC instruction emitter.
-** Copyright (C) 2005-2014 Mike Pall. See Copyright Notice in luajit.h
+** Copyright (C) 2005-2021 Mike Pall. See Copyright Notice in luajit.h
 */
 
 /* -- Emit basic instructions --------------------------------------------- */
@@ -41,13 +41,13 @@ static void emit_rot(ASMState *as, PPCIns pi, Reg ra, Reg rs,
 
 static void emit_slwi(ASMState *as, Reg ra, Reg rs, int32_t n)
 {
-  lua_assert(n >= 0 && n < 32);
+  lj_assertA(n >= 0 && n < 32, "shift out or range");
   emit_rot(as, PPCI_RLWINM, ra, rs, n, 0, 31-n);
 }
 
 static void emit_rotlwi(ASMState *as, Reg ra, Reg rs, int32_t n)
 {
-  lua_assert(n >= 0 && n < 32);
+  lj_assertA(n >= 0 && n < 32, "shift out or range");
   emit_rot(as, PPCI_RLWINM, ra, rs, n, 0, 31);
 }
 
@@ -57,17 +57,17 @@ static void emit_rotlwi(ASMState *as, Reg ra, Reg rs, int32_t n)
 #define emit_canremat(ref)	((ref) <= REF_BASE)
 
 /* Try to find a one step delta relative to another constant. */
-static int emit_kdelta1(ASMState *as, Reg t, int32_t i)
+static int emit_kdelta1(ASMState *as, Reg rd, int32_t i)
 {
   RegSet work = ~as->freeset & RSET_GPR;
   while (work) {
     Reg r = rset_picktop(work);
     IRRef ref = regcost_ref(as->cost[r]);
-    lua_assert(r != t);
+    lj_assertA(r != rd, "dest reg %d not free", rd);
     if (ref < ASMREF_L) {
       int32_t delta = i - (ra_iskref(ref) ? ra_krefk(as, ref) : IR(ref)->i);
       if (checki16(delta)) {
-	emit_tai(as, PPCI_ADDI, t, r, delta);
+	emit_tai(as, PPCI_ADDI, rd, r, delta);
 	return 1;
       }
     }
@@ -98,7 +98,7 @@ static void emit_loadi(ASMState *as, Reg r, int32_t i)
 
 #define emit_loada(as, r, addr)		emit_loadi(as, (r), i32ptr((addr)))
 
-static Reg ra_allock(ASMState *as, int32_t k, RegSet allow);
+static Reg ra_allock(ASMState *as, intptr_t k, RegSet allow);
 
 /* Get/set from constant pointer. */
 static void emit_lsptr(ASMState *as, PPCIns pi, Reg r, void *p, RegSet allow)
@@ -115,8 +115,8 @@ static void emit_lsptr(ASMState *as, PPCIns pi, Reg r, void *p, RegSet allow)
   emit_tai(as, pi, r, base, i);
 }
 
-#define emit_loadn(as, r, tv) \
-  emit_lsptr(as, PPCI_LFD, ((r) & 31), (void *)(tv), RSET_GPR)
+#define emit_loadk64(as, r, ir) \
+  emit_lsptr(as, PPCI_LFD, ((r) & 31), (void *)&ir_knum((ir))->u64, RSET_GPR)
 
 /* Get/set global_State fields. */
 static void emit_lsglptr(ASMState *as, PPCIns pi, Reg r, int32_t ofs)
@@ -144,7 +144,7 @@ static void emit_condbranch(ASMState *as, PPCIns pi, PPCCC cc, MCode *target)
 {
   MCode *p = --as->mcp;
   ptrdiff_t delta = (char *)target - (char *)p;
-  lua_assert(((delta + 0x8000) >> 16) == 0);
+  lj_assertA(((delta + 0x8000) >> 16) == 0, "branch target out of range");
   pi ^= (delta & 0x8000) * (PPCF_Y/0x8000);
   *p = pi | PPCF_CC(cc) | ((uint32_t)delta & 0xffffu);
 }
@@ -186,22 +186,22 @@ static void emit_movrr(ASMState *as, IRIns *ir, Reg dst, Reg src)
     emit_fb(as, PPCI_FMR, dst, src);
 }
 
-/* Generic load of register from stack slot. */
-static void emit_spload(ASMState *as, IRIns *ir, Reg r, int32_t ofs)
+/* Generic load of register with base and (small) offset address. */
+static void emit_loadofs(ASMState *as, IRIns *ir, Reg r, Reg base, int32_t ofs)
 {
   if (r < RID_MAX_GPR)
-    emit_tai(as, PPCI_LWZ, r, RID_SP, ofs);
+    emit_tai(as, PPCI_LWZ, r, base, ofs);
   else
-    emit_fai(as, irt_isnum(ir->t) ? PPCI_LFD : PPCI_LFS, r, RID_SP, ofs);
+    emit_fai(as, irt_isnum(ir->t) ? PPCI_LFD : PPCI_LFS, r, base, ofs);
 }
 
-/* Generic store of register to stack slot. */
-static void emit_spstore(ASMState *as, IRIns *ir, Reg r, int32_t ofs)
+/* Generic store of register with base and (small) offset address. */
+static void emit_storeofs(ASMState *as, IRIns *ir, Reg r, Reg base, int32_t ofs)
 {
   if (r < RID_MAX_GPR)
-    emit_tai(as, PPCI_STW, r, RID_SP, ofs);
+    emit_tai(as, PPCI_STW, r, base, ofs);
   else
-    emit_fai(as, irt_isnum(ir->t) ? PPCI_STFD : PPCI_STFS, r, RID_SP, ofs);
+    emit_fai(as, irt_isnum(ir->t) ? PPCI_STFD : PPCI_STFS, r, base, ofs);
 }
 
 /* Emit a compare (for equality) with a constant operand. */
