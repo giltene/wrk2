@@ -1,6 +1,6 @@
 /*
 ** Lua parser (source code -> bytecode).
-** Copyright (C) 2005-2014 Mike Pall. See Copyright Notice in luajit.h
+** Copyright (C) 2005-2021 Mike Pall. See Copyright Notice in luajit.h
 **
 ** Major portions taken verbatim or adapted from the Lua interpreter.
 ** Copyright (C) 1994-2008 Lua.org, PUC-Rio. See Copyright Notice in lua.h
@@ -13,6 +13,7 @@
 #include "lj_gc.h"
 #include "lj_err.h"
 #include "lj_debug.h"
+#include "lj_buf.h"
 #include "lj_str.h"
 #include "lj_tab.h"
 #include "lj_func.h"
@@ -21,6 +22,7 @@
 #if LJ_HASFFI
 #include "lj_ctype.h"
 #endif
+#include "lj_strfmt.h"
 #include "lj_lex.h"
 #include "lj_parse.h"
 #include "lj_vm.h"
@@ -161,16 +163,22 @@ LJ_STATIC_ASSERT((int)BC_MULVV-(int)BC_ADDVV == (int)OPR_MUL-(int)OPR_ADD);
 LJ_STATIC_ASSERT((int)BC_DIVVV-(int)BC_ADDVV == (int)OPR_DIV-(int)OPR_ADD);
 LJ_STATIC_ASSERT((int)BC_MODVV-(int)BC_ADDVV == (int)OPR_MOD-(int)OPR_ADD);
 
+#ifdef LUA_USE_ASSERT
+#define lj_assertFS(c, ...)	(lj_assertG_(G(fs->L), (c), __VA_ARGS__))
+#else
+#define lj_assertFS(c, ...)	((void)fs)
+#endif
+
 /* -- Error handling ------------------------------------------------------ */
 
 LJ_NORET LJ_NOINLINE static void err_syntax(LexState *ls, ErrMsg em)
 {
-  lj_lex_error(ls, ls->token, em);
+  lj_lex_error(ls, ls->tok, em);
 }
 
-LJ_NORET LJ_NOINLINE static void err_token(LexState *ls, LexToken token)
+LJ_NORET LJ_NOINLINE static void err_token(LexState *ls, LexToken tok)
 {
-  lj_lex_error(ls, ls->token, LJ_ERR_XTOKEN, lj_lex_token2str(ls, token));
+  lj_lex_error(ls, ls->tok, LJ_ERR_XTOKEN, lj_lex_token2str(ls, tok));
 }
 
 LJ_NORET static void err_limit(FuncState *fs, uint32_t limit, const char *what)
@@ -198,7 +206,7 @@ static BCReg const_num(FuncState *fs, ExpDesc *e)
 {
   lua_State *L = fs->L;
   TValue *o;
-  lua_assert(expr_isnumk(e));
+  lj_assertFS(expr_isnumk(e), "bad usage");
   o = lj_tab_set(L, fs->kt, &e->u.nval);
   if (tvhaskslot(o))
     return tvkslot(o);
@@ -223,7 +231,7 @@ static BCReg const_gc(FuncState *fs, GCobj *gc, uint32_t itype)
 /* Add a string constant. */
 static BCReg const_str(FuncState *fs, ExpDesc *e)
 {
-  lua_assert(expr_isstrk(e) || e->k == VGLOBAL);
+  lj_assertFS(expr_isstrk(e) || e->k == VGLOBAL, "bad usage");
   return const_gc(fs, obj2gco(e->u.sval), LJ_TSTR);
 }
 
@@ -311,7 +319,7 @@ static void jmp_patchins(FuncState *fs, BCPos pc, BCPos dest)
 {
   BCIns *jmp = &fs->bcbase[pc].ins;
   BCPos offset = dest-(pc+1)+BCBIAS_J;
-  lua_assert(dest != NO_JMP);
+  lj_assertFS(dest != NO_JMP, "uninitialized jump target");
   if (offset > BCMAX_D)
     err_syntax(fs->ls, LJ_ERR_XJUMP);
   setbc_d(jmp, offset);
@@ -360,7 +368,7 @@ static void jmp_patch(FuncState *fs, BCPos list, BCPos target)
   if (target == fs->pc) {
     jmp_tohere(fs, list);
   } else {
-    lua_assert(target < fs->pc);
+    lj_assertFS(target < fs->pc, "bad jump target");
     jmp_patchval(fs, list, target, NO_REG, target);
   }
 }
@@ -390,7 +398,7 @@ static void bcreg_free(FuncState *fs, BCReg reg)
 {
   if (reg >= fs->nactvar) {
     fs->freereg--;
-    lua_assert(reg == fs->freereg);
+    lj_assertFS(reg == fs->freereg, "bad regfree");
   }
 }
 
@@ -540,7 +548,7 @@ static void expr_toreg_nobranch(FuncState *fs, ExpDesc *e, BCReg reg)
   } else if (e->k <= VKTRUE) {
     ins = BCINS_AD(BC_KPRI, reg, const_pri(e));
   } else {
-    lua_assert(e->k == VVOID || e->k == VJMP);
+    lj_assertFS(e->k == VVOID || e->k == VJMP, "bad expr type %d", e->k);
     return;
   }
   bcemit_INS(fs, ins);
@@ -635,7 +643,7 @@ static void bcemit_store(FuncState *fs, ExpDesc *var, ExpDesc *e)
     ins = BCINS_AD(BC_GSET, ra, const_str(fs, var));
   } else {
     BCReg ra, rc;
-    lua_assert(var->k == VINDEXED);
+    lj_assertFS(var->k == VINDEXED, "bad expr type %d", var->k);
     ra = expr_toanyreg(fs, e);
     rc = var->u.s.aux;
     if ((int32_t)rc < 0) {
@@ -643,10 +651,12 @@ static void bcemit_store(FuncState *fs, ExpDesc *var, ExpDesc *e)
     } else if (rc > BCMAX_C) {
       ins = BCINS_ABC(BC_TSETB, ra, var->u.s.info, rc-(BCMAX_C+1));
     } else {
+#ifdef LUA_USE_ASSERT
       /* Free late alloced key reg to avoid assert on free of value reg. */
       /* This can only happen when called from expr_table(). */
-      lua_assert(e->k != VNONRELOC || ra < fs->nactvar ||
-		 rc < ra || (bcreg_free(fs, rc),1));
+      if (e->k == VNONRELOC && ra >= fs->nactvar && rc >= ra)
+	bcreg_free(fs, rc);
+#endif
       ins = BCINS_ABC(BC_TSETV, ra, var->u.s.info, rc);
     }
   }
@@ -660,16 +670,16 @@ static void bcemit_method(FuncState *fs, ExpDesc *e, ExpDesc *key)
   BCReg idx, func, obj = expr_toanyreg(fs, e);
   expr_free(fs, e);
   func = fs->freereg;
-  bcemit_AD(fs, BC_MOV, func+1, obj);  /* Copy object to first argument. */
-  lua_assert(expr_isstrk(key));
+  bcemit_AD(fs, BC_MOV, func+1+LJ_FR2, obj);  /* Copy object to 1st argument. */
+  lj_assertFS(expr_isstrk(key), "bad usage");
   idx = const_str(fs, key);
   if (idx <= BCMAX_C) {
-    bcreg_reserve(fs, 2);
+    bcreg_reserve(fs, 2+LJ_FR2);
     bcemit_ABC(fs, BC_TGETS, func, obj, idx);
   } else {
-    bcreg_reserve(fs, 3);
-    bcemit_AD(fs, BC_KSTR, func+2, idx);
-    bcemit_ABC(fs, BC_TGETV, func, obj, func+2);
+    bcreg_reserve(fs, 3+LJ_FR2);
+    bcemit_AD(fs, BC_KSTR, func+2+LJ_FR2, idx);
+    bcemit_ABC(fs, BC_TGETV, func, obj, func+2+LJ_FR2);
     fs->freereg--;
   }
   e->u.s.info = func;
@@ -685,10 +695,12 @@ static BCPos bcemit_jmp(FuncState *fs)
   BCPos j = fs->pc - 1;
   BCIns *ip = &fs->bcbase[j].ins;
   fs->jpc = NO_JMP;
-  if ((int32_t)j >= (int32_t)fs->lasttarget && bc_op(*ip) == BC_UCLO)
+  if ((int32_t)j >= (int32_t)fs->lasttarget && bc_op(*ip) == BC_UCLO) {
     setbc_j(ip, NO_JMP);
-  else
+    fs->lasttarget = j+1;
+  } else {
     j = bcemit_AJ(fs, BC_JMP, fs->freereg, NO_JMP);
+  }
   jmp_append(fs, &j, jpc);
   return j;
 }
@@ -799,7 +811,8 @@ static void bcemit_arith(FuncState *fs, BinOpr opr, ExpDesc *e1, ExpDesc *e2)
     else
       rc = expr_toanyreg(fs, e2);
     /* 1st operand discharged by bcemit_binop_left, but need KNUM/KSHORT. */
-    lua_assert(expr_isnumk(e1) || e1->k == VNONRELOC);
+    lj_assertFS(expr_isnumk(e1) || e1->k == VNONRELOC,
+		"bad expr type %d", e1->k);
     expr_toval(fs, e1);
     /* Avoid two consts to satisfy bytecode constraints. */
     if (expr_isnumk(e1) && !expr_isnumk(e2) &&
@@ -849,9 +862,12 @@ static void bcemit_comp(FuncState *fs, BinOpr opr, ExpDesc *e1, ExpDesc *e2)
       e1 = e2; e2 = eret;  /* Swap operands. */
       op = ((op-BC_ISLT)^3)+BC_ISLT;
       expr_toval(fs, e1);
+      ra = expr_toanyreg(fs, e1);
+      rd = expr_toanyreg(fs, e2);
+    } else {
+      rd = expr_toanyreg(fs, e2);
+      ra = expr_toanyreg(fs, e1);
     }
-    rd = expr_toanyreg(fs, e2);
-    ra = expr_toanyreg(fs, e1);
     ins = BCINS_AD(op, ra, rd);
   }
   /* Using expr_free might cause asserts if the order is wrong. */
@@ -884,19 +900,20 @@ static void bcemit_binop(FuncState *fs, BinOpr op, ExpDesc *e1, ExpDesc *e2)
   if (op <= OPR_POW) {
     bcemit_arith(fs, op, e1, e2);
   } else if (op == OPR_AND) {
-    lua_assert(e1->t == NO_JMP);  /* List must be closed. */
+    lj_assertFS(e1->t == NO_JMP, "jump list not closed");
     expr_discharge(fs, e2);
     jmp_append(fs, &e2->f, e1->f);
     *e1 = *e2;
   } else if (op == OPR_OR) {
-    lua_assert(e1->f == NO_JMP);  /* List must be closed. */
+    lj_assertFS(e1->f == NO_JMP, "jump list not closed");
     expr_discharge(fs, e2);
     jmp_append(fs, &e2->t, e1->t);
     *e1 = *e2;
   } else if (op == OPR_CONCAT) {
     expr_toval(fs, e2);
     if (e2->k == VRELOCABLE && bc_op(*bcptr(fs, e2)) == BC_CAT) {
-      lua_assert(e1->u.s.info == bc_b(*bcptr(fs, e2))-1);
+      lj_assertFS(e1->u.s.info == bc_b(*bcptr(fs, e2))-1,
+		  "bad CAT stack layout");
       expr_free(fs, e1);
       setbc_b(bcptr(fs, e2), e1->u.s.info);
       e1->u.s.info = e2->u.s.info;
@@ -908,8 +925,9 @@ static void bcemit_binop(FuncState *fs, BinOpr op, ExpDesc *e1, ExpDesc *e2)
     }
     e1->k = VRELOCABLE;
   } else {
-    lua_assert(op == OPR_NE || op == OPR_EQ ||
-	       op == OPR_LT || op == OPR_GE || op == OPR_LE || op == OPR_GT);
+    lj_assertFS(op == OPR_NE || op == OPR_EQ ||
+	       op == OPR_LT || op == OPR_GE || op == OPR_LE || op == OPR_GT,
+	       "bad binop %d", op);
     bcemit_comp(fs, op, e1, e2);
   }
 }
@@ -938,10 +956,10 @@ static void bcemit_unop(FuncState *fs, BCOp op, ExpDesc *e)
       e->u.s.info = fs->freereg-1;
       e->k = VNONRELOC;
     } else {
-      lua_assert(e->k == VNONRELOC);
+      lj_assertFS(e->k == VNONRELOC, "bad expr type %d", e->k);
     }
   } else {
-    lua_assert(op == BC_UNM || op == BC_LEN);
+    lj_assertFS(op == BC_UNM || op == BC_LEN, "bad unop %d", op);
     if (op == BC_UNM && !expr_hasjump(e)) {  /* Constant-fold negations. */
 #if LJ_HASFFI
       if (e->k == VKCDATA) {  /* Fold in-place since cdata is not interned. */
@@ -981,7 +999,7 @@ static void bcemit_unop(FuncState *fs, BCOp op, ExpDesc *e)
 /* Check and consume optional token. */
 static int lex_opt(LexState *ls, LexToken tok)
 {
-  if (ls->token == tok) {
+  if (ls->tok == tok) {
     lj_lex_next(ls);
     return 1;
   }
@@ -991,7 +1009,7 @@ static int lex_opt(LexState *ls, LexToken tok)
 /* Check and consume token. */
 static void lex_check(LexState *ls, LexToken tok)
 {
-  if (ls->token != tok)
+  if (ls->tok != tok)
     err_token(ls, tok);
   lj_lex_next(ls);
 }
@@ -1005,7 +1023,7 @@ static void lex_match(LexState *ls, LexToken what, LexToken who, BCLine line)
     } else {
       const char *swhat = lj_lex_token2str(ls, what);
       const char *swho = lj_lex_token2str(ls, who);
-      lj_lex_error(ls, ls->token, LJ_ERR_XMATCH, swhat, swho, line);
+      lj_lex_error(ls, ls->tok, LJ_ERR_XMATCH, swhat, swho, line);
     }
   }
 }
@@ -1014,9 +1032,9 @@ static void lex_match(LexState *ls, LexToken what, LexToken who, BCLine line)
 static GCstr *lex_str(LexState *ls)
 {
   GCstr *s;
-  if (ls->token != TK_name && (LJ_52 || ls->token != TK_goto))
+  if (ls->tok != TK_name && (LJ_52 || ls->tok != TK_goto))
     err_token(ls, TK_name);
-  s = strV(&ls->tokenval);
+  s = strV(&ls->tokval);
   lj_lex_next(ls);
   return s;
 }
@@ -1036,8 +1054,9 @@ static void var_new(LexState *ls, BCReg n, GCstr *name)
       lj_lex_error(ls, 0, LJ_ERR_XLIMC, LJ_MAX_VSTACK);
     lj_mem_growvec(ls->L, ls->vstack, ls->sizevstack, LJ_MAX_VSTACK, VarInfo);
   }
-  lua_assert((uintptr_t)name < VARNAME__MAX ||
-	     lj_tab_getstr(fs->kt, name) != NULL);
+  lj_assertFS((uintptr_t)name < VARNAME__MAX ||
+	      lj_tab_getstr(fs->kt, name) != NULL,
+	      "unanchored variable name");
   /* NOBARRIER: name is anchored in fs->kt and ls->vstack is not a GCobj. */
   setgcref(ls->vstack[vtop].name, obj2gco(name));
   fs->varmap[fs->nactvar+n] = (uint16_t)vtop;
@@ -1092,7 +1111,7 @@ static MSize var_lookup_uv(FuncState *fs, MSize vidx, ExpDesc *e)
       return i;  /* Already exists. */
   /* Otherwise create a new one. */
   checklimit(fs, fs->nuv, LJ_MAX_UPVAL, "upvalues");
-  lua_assert(e->k == VLOCAL || e->k == VUPVAL);
+  lj_assertFS(e->k == VLOCAL || e->k == VUPVAL, "bad expr type %d", e->k);
   fs->uvmap[n] = (uint16_t)vidx;
   fs->uvtmp[n] = (uint16_t)(e->k == VLOCAL ? vidx : LJ_MAX_VSTACK+e->u.s.info);
   fs->nuv = n+1;
@@ -1143,7 +1162,8 @@ static MSize gola_new(LexState *ls, GCstr *name, uint8_t info, BCPos pc)
       lj_lex_error(ls, 0, LJ_ERR_XLIMC, LJ_MAX_VSTACK);
     lj_mem_growvec(ls->L, ls->vstack, ls->sizevstack, LJ_MAX_VSTACK, VarInfo);
   }
-  lua_assert(name == NAME_BREAK || lj_tab_getstr(fs->kt, name) != NULL);
+  lj_assertFS(name == NAME_BREAK || lj_tab_getstr(fs->kt, name) != NULL,
+	      "unanchored label name");
   /* NOBARRIER: name is anchored in fs->kt and ls->vstack is not a GCobj. */
   setgcref(ls->vstack[vtop].name, obj2gco(name));
   ls->vstack[vtop].startpc = pc;
@@ -1173,8 +1193,9 @@ static void gola_close(LexState *ls, VarInfo *vg)
   FuncState *fs = ls->fs;
   BCPos pc = vg->startpc;
   BCIns *ip = &fs->bcbase[pc].ins;
-  lua_assert(gola_isgoto(vg));
-  lua_assert(bc_op(*ip) == BC_JMP || bc_op(*ip) == BC_UCLO);
+  lj_assertFS(gola_isgoto(vg), "expected goto");
+  lj_assertFS(bc_op(*ip) == BC_JMP || bc_op(*ip) == BC_UCLO,
+	      "bad bytecode op %d", bc_op(*ip));
   setbc_a(ip, vg->slot);
   if (bc_op(*ip) == BC_JMP) {
     BCPos next = jmp_next(fs, pc);
@@ -1193,9 +1214,9 @@ static void gola_resolve(LexState *ls, FuncScope *bl, MSize idx)
     if (gcrefeq(vg->name, vl->name) && gola_isgoto(vg)) {
       if (vg->slot < vl->slot) {
 	GCstr *name = strref(var_get(ls, ls->fs, vg->slot).name);
-	lua_assert((uintptr_t)name >= VARNAME__MAX);
+	lj_assertLS((uintptr_t)name >= VARNAME__MAX, "expected goto name");
 	ls->linenumber = ls->fs->bcbase[vg->startpc].line;
-	lua_assert(strref(vg->name) != NAME_BREAK);
+	lj_assertLS(strref(vg->name) != NAME_BREAK, "unexpected break");
 	lj_lex_error(ls, 0, LJ_ERR_XGSCOPE,
 		     strdata(strref(vg->name)), strdata(name));
       }
@@ -1259,7 +1280,7 @@ static void fscope_begin(FuncState *fs, FuncScope *bl, int flags)
   bl->vstart = fs->ls->vtop;
   bl->prev = fs->bl;
   fs->bl = bl;
-  lua_assert(fs->freereg == fs->nactvar);
+  lj_assertFS(fs->freereg == fs->nactvar, "bad regalloc");
 }
 
 /* End a scope. */
@@ -1270,7 +1291,7 @@ static void fscope_end(FuncState *fs)
   fs->bl = bl->prev;
   var_remove(ls, bl->nactvar);
   fs->freereg = fs->nactvar;
-  lua_assert(bl->nactvar == fs->nactvar);
+  lj_assertFS(bl->nactvar == fs->nactvar, "bad regalloc");
   if ((bl->flags & (FSCOPE_UPVAL|FSCOPE_NOCLOSE)) == FSCOPE_UPVAL)
     bcemit_AJ(fs, BC_UCLO, bl->nactvar, 0);
   if ((bl->flags & FSCOPE_BREAK)) {
@@ -1278,12 +1299,14 @@ static void fscope_end(FuncState *fs)
       MSize idx = gola_new(ls, NAME_BREAK, VSTACK_LABEL, fs->pc);
       ls->vtop = idx;  /* Drop break label immediately. */
       gola_resolve(ls, bl, idx);
+    } else {  /* Need the fixup step to propagate the breaks. */
+      gola_fixup(ls, bl);
       return;
-    }  /* else: need the fixup step to propagate the breaks. */
-  } else if (!(bl->flags & FSCOPE_GOLA)) {
-    return;
+    }
   }
-  gola_fixup(ls, bl);
+  if ((bl->flags & FSCOPE_GOLA)) {
+    gola_fixup(ls, bl);
+  }
 }
 
 /* Mark scope as having an upvalue. */
@@ -1355,13 +1378,13 @@ static void fs_fixup_k(FuncState *fs, GCproto *pt, void *kptr)
     Node *n = &node[i];
     if (tvhaskslot(&n->val)) {
       ptrdiff_t kidx = (ptrdiff_t)tvkslot(&n->val);
-      lua_assert(!tvisint(&n->key));
+      lj_assertFS(!tvisint(&n->key), "unexpected integer key");
       if (tvisnum(&n->key)) {
 	TValue *tv = &((TValue *)kptr)[kidx];
 	if (LJ_DUALNUM) {
 	  lua_Number nn = numV(&n->key);
 	  int32_t k = lj_num2int(nn);
-	  lua_assert(!tvismzero(&n->key));
+	  lj_assertFS(!tvismzero(&n->key), "unexpected -0 key");
 	  if ((lua_Number)k == nn)
 	    setintV(tv, k);
 	  else
@@ -1409,58 +1432,24 @@ static void fs_fixup_line(FuncState *fs, GCproto *pt,
     uint8_t *li = (uint8_t *)lineinfo;
     do {
       BCLine delta = base[i].line - first;
-      lua_assert(delta >= 0 && delta < 256);
+      lj_assertFS(delta >= 0 && delta < 256, "bad line delta");
       li[i] = (uint8_t)delta;
     } while (++i < n);
   } else if (LJ_LIKELY(numline < 65536)) {
     uint16_t *li = (uint16_t *)lineinfo;
     do {
       BCLine delta = base[i].line - first;
-      lua_assert(delta >= 0 && delta < 65536);
+      lj_assertFS(delta >= 0 && delta < 65536, "bad line delta");
       li[i] = (uint16_t)delta;
     } while (++i < n);
   } else {
     uint32_t *li = (uint32_t *)lineinfo;
     do {
       BCLine delta = base[i].line - first;
-      lua_assert(delta >= 0);
+      lj_assertFS(delta >= 0, "bad line delta");
       li[i] = (uint32_t)delta;
     } while (++i < n);
   }
-}
-
-/* Resize buffer if needed. */
-static LJ_NOINLINE void fs_buf_resize(LexState *ls, MSize len)
-{
-  MSize sz = ls->sb.sz * 2;
-  while (ls->sb.n + len > sz) sz = sz * 2;
-  lj_str_resizebuf(ls->L, &ls->sb, sz);
-}
-
-static LJ_AINLINE void fs_buf_need(LexState *ls, MSize len)
-{
-  if (LJ_UNLIKELY(ls->sb.n + len > ls->sb.sz))
-    fs_buf_resize(ls, len);
-}
-
-/* Add string to buffer. */
-static void fs_buf_str(LexState *ls, const char *str, MSize len)
-{
-  char *p = ls->sb.buf + ls->sb.n;
-  MSize i;
-  ls->sb.n += len;
-  for (i = 0; i < len; i++) p[i] = str[i];
-}
-
-/* Add ULEB128 value to buffer. */
-static void fs_buf_uleb128(LexState *ls, uint32_t v)
-{
-  MSize n = ls->sb.n;
-  uint8_t *p = (uint8_t *)ls->sb.buf;
-  for (; v >= 0x80; v >>= 7)
-    p[n++] = (uint8_t)((v & 0x7f) | 0x80);
-  p[n++] = (uint8_t)v;
-  ls->sb.n = n;
 }
 
 /* Prepare variable info for prototype. */
@@ -1469,38 +1458,40 @@ static size_t fs_prep_var(LexState *ls, FuncState *fs, size_t *ofsvar)
   VarInfo *vs =ls->vstack, *ve;
   MSize i, n;
   BCPos lastpc;
-  lj_str_resetbuf(&ls->sb);  /* Copy to temp. string buffer. */
+  lj_buf_reset(&ls->sb);  /* Copy to temp. string buffer. */
   /* Store upvalue names. */
   for (i = 0, n = fs->nuv; i < n; i++) {
     GCstr *s = strref(vs[fs->uvmap[i]].name);
     MSize len = s->len+1;
-    fs_buf_need(ls, len);
-    fs_buf_str(ls, strdata(s), len);
+    char *p = lj_buf_more(&ls->sb, len);
+    p = lj_buf_wmem(p, strdata(s), len);
+    setsbufP(&ls->sb, p);
   }
-  *ofsvar = ls->sb.n;
+  *ofsvar = sbuflen(&ls->sb);
   lastpc = 0;
   /* Store local variable names and compressed ranges. */
   for (ve = vs + ls->vtop, vs += fs->vbase; vs < ve; vs++) {
     if (!gola_isgotolabel(vs)) {
       GCstr *s = strref(vs->name);
       BCPos startpc;
+      char *p;
       if ((uintptr_t)s < VARNAME__MAX) {
-	fs_buf_need(ls, 1 + 2*5);
-	ls->sb.buf[ls->sb.n++] = (uint8_t)(uintptr_t)s;
+	p = lj_buf_more(&ls->sb, 1 + 2*5);
+	*p++ = (char)(uintptr_t)s;
       } else {
 	MSize len = s->len+1;
-	fs_buf_need(ls, len + 2*5);
-	fs_buf_str(ls, strdata(s), len);
+	p = lj_buf_more(&ls->sb, len + 2*5);
+	p = lj_buf_wmem(p, strdata(s), len);
       }
       startpc = vs->startpc;
-      fs_buf_uleb128(ls, startpc-lastpc);
-      fs_buf_uleb128(ls, vs->endpc-startpc);
+      p = lj_strfmt_wuleb128(p, startpc-lastpc);
+      p = lj_strfmt_wuleb128(p, vs->endpc-startpc);
+      setsbufP(&ls->sb, p);
       lastpc = startpc;
     }
   }
-  fs_buf_need(ls, 1);
-  ls->sb.buf[ls->sb.n++] = '\0';  /* Terminator for varinfo. */
-  return ls->sb.n;
+  lj_buf_putb(&ls->sb, '\0');  /* Terminator for varinfo. */
+  return sbuflen(&ls->sb);
 }
 
 /* Fixup variable info for prototype. */
@@ -1508,7 +1499,7 @@ static void fs_fixup_var(LexState *ls, GCproto *pt, uint8_t *p, size_t ofsvar)
 {
   setmref(pt->uvinfo, p);
   setmref(pt->varinfo, (char *)p + ofsvar);
-  memcpy(p, ls->sb.buf, ls->sb.n);  /* Copy from temp. string buffer. */
+  memcpy(p, sbufB(&ls->sb), sbuflen(&ls->sb));  /* Copy from temp. buffer. */
 }
 #else
 
@@ -1545,7 +1536,7 @@ static void fs_fixup_ret(FuncState *fs)
   }
   fs->bl->flags |= FSCOPE_NOCLOSE;  /* Handled above. */
   fscope_end(fs);
-  lua_assert(fs->bl == NULL);
+  lj_assertFS(fs->bl == NULL, "bad scope nesting");
   /* May need to fixup returns encoded before first function was created. */
   if (fs->flags & PROTO_FIXUP_RETURN) {
     BCPos pc;
@@ -1617,7 +1608,7 @@ static GCproto *fs_finish(LexState *ls, BCLine line)
   L->top--;  /* Pop table of constants. */
   ls->vtop = fs->vbase;  /* Reset variable stack. */
   ls->fs = fs->prev;
-  lua_assert(ls->fs != NULL || ls->token == TK_eof);
+  lj_assertL(ls->fs != NULL || ls->tok == TK_eof, "bad parser state");
   return pt;
 }
 
@@ -1711,15 +1702,15 @@ static void expr_bracket(LexState *ls, ExpDesc *v)
 }
 
 /* Get value of constant expression. */
-static void expr_kvalue(TValue *v, ExpDesc *e)
+static void expr_kvalue(FuncState *fs, TValue *v, ExpDesc *e)
 {
+  UNUSED(fs);
   if (e->k <= VKTRUE) {
-    setitype(v, ~(uint32_t)e->k);
+    setpriV(v, ~(uint32_t)e->k);
   } else if (e->k == VKSTR) {
-    setgcref(v->gcr, obj2gco(e->u.sval));
-    setitype(v, LJ_TSTR);
+    setgcVraw(v, obj2gco(e->u.sval), LJ_TSTR);
   } else {
-    lua_assert(tvisnumber(expr_numtv(e)));
+    lj_assertFS(tvisnumber(expr_numtv(e)), "bad number constant");
     *v = *expr_numtv(e);
   }
 }
@@ -1739,15 +1730,15 @@ static void expr_table(LexState *ls, ExpDesc *e)
   bcreg_reserve(fs, 1);
   freg++;
   lex_check(ls, '{');
-  while (ls->token != '}') {
+  while (ls->tok != '}') {
     ExpDesc key, val;
     vcall = 0;
-    if (ls->token == '[') {
+    if (ls->tok == '[') {
       expr_bracket(ls, &key);  /* Already calls expr_toval. */
       if (!expr_isk(&key)) expr_index(fs, e, &key);
       if (expr_isnumk(&key) && expr_numiszero(&key)) needarr = 1; else nhash++;
       lex_check(ls, '=');
-    } else if ((ls->token == TK_name || (!LJ_52 && ls->token == TK_goto)) &&
+    } else if ((ls->tok == TK_name || (!LJ_52 && ls->tok == TK_goto)) &&
 	       lj_lex_lookahead(ls) == '=') {
       expr_str(ls, &key);
       lex_check(ls, '=');
@@ -1769,11 +1760,11 @@ static void expr_table(LexState *ls, ExpDesc *e)
 	fs->bcbase[pc].ins = BCINS_AD(BC_TDUP, freg-1, kidx);
       }
       vcall = 0;
-      expr_kvalue(&k, &key);
+      expr_kvalue(fs, &k, &key);
       v = lj_tab_set(fs->L, t, &k);
       lj_gc_anybarriert(fs->L, t);
       if (expr_isk_nojump(&val)) {  /* Add const key/value to template table. */
-	expr_kvalue(v, &val);
+	expr_kvalue(fs, v, &val);
       } else {  /* Otherwise create dummy string key (avoids lj_tab_newkey). */
 	settabV(fs->L, v, t);  /* Preserve key with table itself as value. */
 	fixt = 1;   /* Fix this later, after all resizes. */
@@ -1792,8 +1783,9 @@ static void expr_table(LexState *ls, ExpDesc *e)
   if (vcall) {
     BCInsLine *ilp = &fs->bcbase[fs->pc-1];
     ExpDesc en;
-    lua_assert(bc_a(ilp->ins) == freg &&
-	       bc_op(ilp->ins) == (narr > 256 ? BC_TSETV : BC_TSETB));
+    lj_assertFS(bc_a(ilp->ins) == freg &&
+		bc_op(ilp->ins) == (narr > 256 ? BC_TSETV : BC_TSETB),
+		"bad CALL code generation");
     expr_init(&en, VKNUM, 0);
     en.u.nval.u32.lo = narr-1;
     en.u.nval.u32.hi = 0x43300000;  /* Biased integer to avoid denormals. */
@@ -1823,7 +1815,7 @@ static void expr_table(LexState *ls, ExpDesc *e)
       for (i = 0; i <= hmask; i++) {
 	Node *n = &node[i];
 	if (tvistab(&n->val)) {
-	  lua_assert(tabV(&n->val) == t);
+	  lj_assertFS(tabV(&n->val) == t, "bad dummy key in template table");
 	  setnilV(&n->val);  /* Turn value into nil. */
 	}
       }
@@ -1840,11 +1832,11 @@ static BCReg parse_params(LexState *ls, int needself)
   lex_check(ls, '(');
   if (needself)
     var_new_lit(ls, nparams++, "self");
-  if (ls->token != ')') {
+  if (ls->tok != ')') {
     do {
-      if (ls->token == TK_name || (!LJ_52 && ls->token == TK_goto)) {
+      if (ls->tok == TK_name || (!LJ_52 && ls->tok == TK_goto)) {
 	var_new(ls, nparams++, lex_str(ls));
-      } else if (ls->token == TK_dots) {
+      } else if (ls->tok == TK_dots) {
 	lj_lex_next(ls);
 	fs->flags |= PROTO_VARARG;
 	break;
@@ -1854,7 +1846,7 @@ static BCReg parse_params(LexState *ls, int needself)
     } while (lex_opt(ls, ','));
   }
   var_add(ls, nparams);
-  lua_assert(fs->nactvar == nparams);
+  lj_assertFS(fs->nactvar == nparams, "bad regalloc");
   bcreg_reserve(fs, nparams);
   lex_check(ls, ')');
   return nparams;
@@ -1878,7 +1870,7 @@ static void parse_body(LexState *ls, ExpDesc *e, int needself, BCLine line)
   fs.bclim = pfs->bclim - pfs->pc;
   bcemit_AD(&fs, BC_FUNCF, 0, 0);  /* Placeholder. */
   parse_chunk(ls);
-  if (ls->token != TK_end) lex_match(ls, TK_end, TK_function, line);
+  if (ls->tok != TK_end) lex_match(ls, TK_end, TK_function, line);
   pt = fs_finish(ls, (ls->lastline = ls->linenumber));
   pfs->bcbase = ls->bcstack + oldbase;  /* May have been reallocated. */
   pfs->bclim = (BCPos)(ls->sizebcstack - oldbase);
@@ -1917,13 +1909,13 @@ static void parse_args(LexState *ls, ExpDesc *e)
   BCIns ins;
   BCReg base;
   BCLine line = ls->linenumber;
-  if (ls->token == '(') {
+  if (ls->tok == '(') {
 #if !LJ_52
     if (line != ls->lastline)
       err_syntax(ls, LJ_ERR_XAMBIG);
 #endif
     lj_lex_next(ls);
-    if (ls->token == ')') {  /* f(). */
+    if (ls->tok == ')') {  /* f(). */
       args.k = VVOID;
     } else {
       expr_list(ls, &args);
@@ -1931,24 +1923,24 @@ static void parse_args(LexState *ls, ExpDesc *e)
 	setbc_b(bcptr(fs, &args), 0);  /* Pass on multiple results. */
     }
     lex_match(ls, ')', '(', line);
-  } else if (ls->token == '{') {
+  } else if (ls->tok == '{') {
     expr_table(ls, &args);
-  } else if (ls->token == TK_string) {
+  } else if (ls->tok == TK_string) {
     expr_init(&args, VKSTR, 0);
-    args.u.sval = strV(&ls->tokenval);
+    args.u.sval = strV(&ls->tokval);
     lj_lex_next(ls);
   } else {
     err_syntax(ls, LJ_ERR_XFUNARG);
     return;  /* Silence compiler. */
   }
-  lua_assert(e->k == VNONRELOC);
+  lj_assertFS(e->k == VNONRELOC, "bad expr type %d", e->k);
   base = e->u.s.info;  /* Base register for call. */
   if (args.k == VCALL) {
-    ins = BCINS_ABC(BC_CALLM, base, 2, args.u.s.aux - base - 1);
+    ins = BCINS_ABC(BC_CALLM, base, 2, args.u.s.aux - base - 1 - LJ_FR2);
   } else {
     if (args.k != VVOID)
       expr_tonextreg(fs, &args);
-    ins = BCINS_ABC(BC_CALL, base, 2, fs->freereg - base);
+    ins = BCINS_ABC(BC_CALL, base, 2, fs->freereg - base - LJ_FR2);
   }
   expr_init(e, VCALL, bcemit_INS(fs, ins));
   e->u.s.aux = base;
@@ -1961,33 +1953,34 @@ static void expr_primary(LexState *ls, ExpDesc *v)
 {
   FuncState *fs = ls->fs;
   /* Parse prefix expression. */
-  if (ls->token == '(') {
+  if (ls->tok == '(') {
     BCLine line = ls->linenumber;
     lj_lex_next(ls);
     expr(ls, v);
     lex_match(ls, ')', '(', line);
     expr_discharge(ls->fs, v);
-  } else if (ls->token == TK_name || (!LJ_52 && ls->token == TK_goto)) {
+  } else if (ls->tok == TK_name || (!LJ_52 && ls->tok == TK_goto)) {
     var_lookup(ls, v);
   } else {
     err_syntax(ls, LJ_ERR_XSYMBOL);
   }
   for (;;) {  /* Parse multiple expression suffixes. */
-    if (ls->token == '.') {
+    if (ls->tok == '.') {
       expr_field(ls, v);
-    } else if (ls->token == '[') {
+    } else if (ls->tok == '[') {
       ExpDesc key;
       expr_toanyreg(fs, v);
       expr_bracket(ls, &key);
       expr_index(fs, v, &key);
-    } else if (ls->token == ':') {
+    } else if (ls->tok == ':') {
       ExpDesc key;
       lj_lex_next(ls);
       expr_str(ls, &key);
       bcemit_method(fs, v, &key);
       parse_args(ls, v);
-    } else if (ls->token == '(' || ls->token == TK_string || ls->token == '{') {
+    } else if (ls->tok == '(' || ls->tok == TK_string || ls->tok == '{') {
       expr_tonextreg(fs, v);
+      if (LJ_FR2) bcreg_reserve(fs, 1);
       parse_args(ls, v);
     } else {
       break;
@@ -1998,14 +1991,14 @@ static void expr_primary(LexState *ls, ExpDesc *v)
 /* Parse simple expression. */
 static void expr_simple(LexState *ls, ExpDesc *v)
 {
-  switch (ls->token) {
+  switch (ls->tok) {
   case TK_number:
-    expr_init(v, (LJ_HASFFI && tviscdata(&ls->tokenval)) ? VKCDATA : VKNUM, 0);
-    copyTV(ls->L, &v->u.nval, &ls->tokenval);
+    expr_init(v, (LJ_HASFFI && tviscdata(&ls->tokval)) ? VKCDATA : VKNUM, 0);
+    copyTV(ls->L, &v->u.nval, &ls->tokval);
     break;
   case TK_string:
     expr_init(v, VKSTR, 0);
-    v->u.sval = strV(&ls->tokenval);
+    v->u.sval = strV(&ls->tokval);
     break;
   case TK_nil:
     expr_init(v, VKNIL, 0);
@@ -2093,11 +2086,11 @@ static BinOpr expr_binop(LexState *ls, ExpDesc *v, uint32_t limit);
 static void expr_unop(LexState *ls, ExpDesc *v)
 {
   BCOp op;
-  if (ls->token == TK_not) {
+  if (ls->tok == TK_not) {
     op = BC_NOT;
-  } else if (ls->token == '-') {
+  } else if (ls->tok == '-') {
     op = BC_UNM;
-  } else if (ls->token == '#') {
+  } else if (ls->tok == '#') {
     op = BC_LEN;
   } else {
     expr_simple(ls, v);
@@ -2114,7 +2107,7 @@ static BinOpr expr_binop(LexState *ls, ExpDesc *v, uint32_t limit)
   BinOpr op;
   synlevel_begin(ls);
   expr_unop(ls, v);
-  op = token2binop(ls->token);
+  op = token2binop(ls->tok);
   while (op != OPR_NOBINOPR && priority[op].left > limit) {
     ExpDesc v2;
     BinOpr nextop;
@@ -2205,6 +2198,8 @@ static void assign_adjust(LexState *ls, BCReg nvars, BCReg nexps, ExpDesc *e)
       bcemit_nil(fs, reg, (BCReg)extra);
     }
   }
+  if (nexps > nvars)
+    ls->fs->freereg -= nexps - nvars;  /* Drop leftover regs. */
 }
 
 /* Recursively parse assignment statement. */
@@ -2238,8 +2233,6 @@ static void parse_assignment(LexState *ls, LHSVarList *lh, BCReg nvars)
       return;
     }
     assign_adjust(ls, nvars, nexps, &e);
-    if (nexps > nvars)
-      ls->fs->freereg -= nexps - nvars;  /* Drop leftover regs. */
   }
   /* Assign RHS to LHS and recurse downwards. */
   expr_init(&e, VNONRELOC, ls->fs->freereg-1);
@@ -2303,9 +2296,9 @@ static void parse_func(LexState *ls, BCLine line)
   lj_lex_next(ls);  /* Skip 'function'. */
   /* Parse function name. */
   var_lookup(ls, &v);
-  while (ls->token == '.')  /* Multiple dot-separated fields. */
+  while (ls->tok == '.')  /* Multiple dot-separated fields. */
     expr_field(ls, &v);
-  if (ls->token == ':') {  /* Optional colon to signify method call. */
+  if (ls->tok == ':') {  /* Optional colon to signify method call. */
     needself = 1;
     expr_field(ls, &v);
   }
@@ -2318,9 +2311,9 @@ static void parse_func(LexState *ls, BCLine line)
 /* -- Control transfer statements ----------------------------------------- */
 
 /* Check for end of block. */
-static int endofblock(LexToken token)
+static int parse_isend(LexToken tok)
 {
-  switch (token) {
+  switch (tok) {
   case TK_else: case TK_elseif: case TK_end: case TK_until: case TK_eof:
     return 1;
   default:
@@ -2335,7 +2328,7 @@ static void parse_return(LexState *ls)
   FuncState *fs = ls->fs;
   lj_lex_next(ls);  /* Skip 'return'. */
   fs->flags |= PROTO_HAS_RETURN;
-  if (endofblock(ls->token) || ls->token == ';') {  /* Bare return. */
+  if (parse_isend(ls->tok) || ls->tok == ';') {  /* Bare return. */
     ins = BCINS_AD(BC_RET0, 0, 1);
   } else {  /* Return with one or more values. */
     ExpDesc e;  /* Receives the _last_ expression in the list. */
@@ -2401,18 +2394,18 @@ static void parse_label(LexState *ls)
   lex_check(ls, TK_label);
   /* Recursively parse trailing statements: labels and ';' (Lua 5.2 only). */
   for (;;) {
-    if (ls->token == TK_label) {
+    if (ls->tok == TK_label) {
       synlevel_begin(ls);
       parse_label(ls);
       synlevel_end(ls);
-    } else if (LJ_52 && ls->token == ';') {
+    } else if (LJ_52 && ls->tok == ';') {
       lj_lex_next(ls);
     } else {
       break;
     }
   }
   /* Trailing label is considered to be outside of scope. */
-  if (endofblock(ls->token) && ls->token != TK_until)
+  if (parse_isend(ls->tok) && ls->tok != TK_until)
     ls->vstack[idx].slot = fs->bl->nactvar;
   gola_resolve(ls, fs->bl, idx);
 }
@@ -2568,7 +2561,8 @@ static void parse_for_iter(LexState *ls, GCstr *indexname)
   lex_check(ls, TK_in);
   line = ls->linenumber;
   assign_adjust(ls, 3, expr_list(ls, &e), &e);
-  bcreg_bump(fs, 3);  /* The iterator needs another 3 slots (func + 2 args). */
+  /* The iterator needs another 3 [4] slots (func [pc] | state ctl). */
+  bcreg_bump(fs, 3+LJ_FR2);
   isnext = (nvars <= 5 && predict_next(ls, fs, exprpc));
   var_add(ls, 3);  /* Hidden control variables. */
   lex_check(ls, TK_do);
@@ -2596,9 +2590,9 @@ static void parse_for(LexState *ls, BCLine line)
   fscope_begin(fs, &bl, FSCOPE_LOOP);
   lj_lex_next(ls);  /* Skip 'for'. */
   varname = lex_str(ls);  /* Get first variable name. */
-  if (ls->token == '=')
+  if (ls->tok == '=')
     parse_for_num(ls, varname, line);
-  else if (ls->token == ',' || ls->token == TK_in)
+  else if (ls->tok == ',' || ls->tok == TK_in)
     parse_for_iter(ls, varname);
   else
     err_syntax(ls, LJ_ERR_XFOR);
@@ -2624,12 +2618,12 @@ static void parse_if(LexState *ls, BCLine line)
   BCPos flist;
   BCPos escapelist = NO_JMP;
   flist = parse_then(ls);
-  while (ls->token == TK_elseif) {  /* Parse multiple 'elseif' blocks. */
+  while (ls->tok == TK_elseif) {  /* Parse multiple 'elseif' blocks. */
     jmp_append(fs, &escapelist, bcemit_jmp(fs));
     jmp_tohere(fs, flist);
     flist = parse_then(ls);
   }
-  if (ls->token == TK_else) {  /* Parse optional 'else' block. */
+  if (ls->tok == TK_else) {  /* Parse optional 'else' block. */
     jmp_append(fs, &escapelist, bcemit_jmp(fs));
     jmp_tohere(fs, flist);
     lj_lex_next(ls);  /* Skip 'else'. */
@@ -2647,7 +2641,7 @@ static void parse_if(LexState *ls, BCLine line)
 static int parse_stmt(LexState *ls)
 {
   BCLine line = ls->linenumber;
-  switch (ls->token) {
+  switch (ls->tok) {
   case TK_if:
     parse_if(ls, line);
     break;
@@ -2692,7 +2686,8 @@ static int parse_stmt(LexState *ls)
       lj_lex_next(ls);
       parse_goto(ls);
       break;
-    }  /* else: fallthrough */
+    }
+    /* fallthrough */
   default:
     parse_call_assign(ls);
     break;
@@ -2705,11 +2700,12 @@ static void parse_chunk(LexState *ls)
 {
   int islast = 0;
   synlevel_begin(ls);
-  while (!islast && !endofblock(ls->token)) {
+  while (!islast && !parse_isend(ls->tok)) {
     islast = parse_stmt(ls);
     lex_opt(ls, ';');
-    lua_assert(ls->fs->framesize >= ls->fs->freereg &&
-	       ls->fs->freereg >= ls->fs->nactvar);
+    lj_assertLS(ls->fs->framesize >= ls->fs->freereg &&
+		ls->fs->freereg >= ls->fs->nactvar,
+		"bad regalloc");
     ls->fs->freereg = ls->fs->nactvar;  /* Free registers after each stmt. */
   }
   synlevel_end(ls);
@@ -2740,13 +2736,12 @@ GCproto *lj_parse(LexState *ls)
   bcemit_AD(&fs, BC_FUNCV, 0, 0);  /* Placeholder. */
   lj_lex_next(ls);  /* Read-ahead first token. */
   parse_chunk(ls);
-  if (ls->token != TK_eof)
+  if (ls->tok != TK_eof)
     err_token(ls, TK_eof);
   pt = fs_finish(ls, ls->linenumber);
   L->top--;  /* Drop chunkname. */
-  lua_assert(fs.prev == NULL);
-  lua_assert(ls->fs == NULL);
-  lua_assert(pt->sizeuv == 0);
+  lj_assertL(fs.prev == NULL && ls->fs == NULL, "mismatched frame nesting");
+  lj_assertL(pt->sizeuv == 0, "toplevel proto has upvalues");
   return pt;
 }
 
