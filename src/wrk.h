@@ -15,7 +15,7 @@
 #include "stats.h"
 #include "ae.h"
 #include "http_parser.h"
-#include "hdr_histogram.h"
+#include <hdr/hdr_histogram.h>
 
 #define RECVBUF  8192
 #define SAMPLES  100000000

@@ -1,5 +1,5 @@
 CFLAGS  += -std=c99 -Wall -O2 -D_REENTRANT
-LIBS    := -lm -lssl -lcrypto -lpthread
+LIBS    := -lm -lssl -lcrypto -lpthread -lhdr_histogram_static
 
 TARGET  := $(shell uname -s | tr '[A-Z]' '[a-z]' 2>/dev/null || echo unknown)
 
@@ -19,7 +19,7 @@ else ifeq ($(TARGET), freebsd)
 endif
 
 SRC  := wrk.c net.c ssl.c aprintf.c stats.c script.c units.c \
-		ae.c zmalloc.c http_parser.c tinymt64.c hdr_histogram.c
+		ae.c zmalloc.c http_parser.c tinymt64.c
 BIN  := wrk
 VER  ?= $(shell git describe --tags --always --dirty)
 
@@ -45,6 +45,8 @@ ifneq ($(WITH_OPENSSL),)
 else
 	DEPS += $(ODIR)/lib/libssl.a
 endif
+
+DEPS += $(ODIR)/lib/libhdr_histogram_static.a
 
 all: $(BIN)
 
@@ -75,8 +77,13 @@ $(ODIR)/%.o : %.c
 
 LUAJIT  := $(notdir $(patsubst %.tar.gz,%,$(wildcard deps/LuaJIT*.tar.gz)))
 OPENSSL := $(notdir $(patsubst %.tar.gz,%,$(wildcard deps/openssl*.tar.gz)))
+HDRHISTOGRAM := $(notdir $(patsubst %.tar.gz,%,$(wildcard deps/HdrHistogram_c*.tar.gz)))
 
 OPENSSL_OPTS = no-shared no-psk no-srp no-dtls no-idea --prefix=$(abspath $(ODIR))
+
+$(ODIR)/$(HDRHISTOGRAM):  deps/$(HDRHISTOGRAM).tar.gz  | $(ODIR)
+	@tar -C $(ODIR) -xf $<
+	@cd $(ODIR)/HdrHistogram_c* && cmake -DCMAKE_INSTALL_PREFIX:PATH=$(abspath $(ODIR)) .
 
 $(ODIR)/$(LUAJIT):  deps/$(LUAJIT).tar.gz  | $(ODIR)
 	@tar -C $(ODIR) -xf $<
@@ -84,10 +91,15 @@ $(ODIR)/$(LUAJIT):  deps/$(LUAJIT).tar.gz  | $(ODIR)
 $(ODIR)/$(OPENSSL): deps/$(OPENSSL).tar.gz | $(ODIR)
 	@tar -C $(ODIR) -xf $<
 
+$(ODIR)/lib/libhdr_histogram_static.a: $(ODIR)/$(HDRHISTOGRAM)
+	@echo Building HdrHistogram_c...
+	@cd $(ODIR)/$(HDRHISTOGRAM)
+	@$(MAKE) -C $< install
+
 $(ODIR)/lib/libluajit-5.1.a: $(ODIR)/$(LUAJIT)
 	@echo Building LuaJIT...
 	@$(MAKE) -C $< PREFIX=$(abspath $(ODIR)) BUILDMODE=static install
-	@cd $(ODIR)/bin && ln -s luajit-2.1.0-beta3 luajit
+	@cd $(ODIR)/bin && ln -sf luajit-2.1.0-beta3 luajit
 
 $(ODIR)/lib/libssl.a: $(ODIR)/$(OPENSSL)
 	@echo Building OpenSSL...

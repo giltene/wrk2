@@ -4,7 +4,7 @@
 #include <stdio.h>
 #include <stdbool.h>
 #include "tinymt64.h"
-#include "hdr_histogram.h"
+#include <hdr/hdr_histogram.h>
 
 #define MAX(X, Y) ((X) > (Y) ? (X) : (Y))
 #define MIN(X, Y) ((X) < (Y) ? (X) : (Y))

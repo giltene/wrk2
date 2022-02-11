@@ -3,7 +3,7 @@
 #include "wrk.h"
 #include "script.h"
 #include "main.h"
-#include "hdr_histogram.h"
+#include <hdr/hdr_histogram.h>
 #include "stats.h"
 
 // Max recordable latency of 1 day

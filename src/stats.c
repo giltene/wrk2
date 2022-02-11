@@ -96,11 +96,11 @@ long double stats_within_stdev(stats *stats, long double mean, long double stdev
         int64_t upper_count = 0;
         bool found_upper = false;
         while (hdr_iter_next(&iter)) {
-            if (lower_value > iter.value_from_index) {
-                lower_count = iter.count_to_index;
+            if (lower_value > iter.value) {
+                lower_count = iter.count;
             }
             if (upper_value < iter.highest_equivalent_value) {
-                upper_count = iter.count_to_index;
+                upper_count = iter.count;
                 found_upper = true;
                 break;
             }
