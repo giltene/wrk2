@@ -1,6 +1,6 @@
 /*
 ** DynASM MIPS encoding engine.
-** Copyright (C) 2005-2014 Mike Pall. All rights reserved.
+** Copyright (C) 2005-2022 Mike Pall. All rights reserved.
 ** Released under the MIT license. See dynasm.lua for full copyright notice.
 */
 
@@ -21,7 +21,7 @@ enum {
   /* The following actions need a buffer position. */
   DASM_ALIGN, DASM_REL_LG, DASM_LABEL_LG,
   /* The following actions also have an argument. */
-  DASM_REL_PC, DASM_LABEL_PC, DASM_IMM,
+  DASM_REL_PC, DASM_LABEL_PC, DASM_IMM, DASM_IMMS,
   DASM__MAX
 };
 
@@ -155,10 +155,10 @@ void dasm_setup(Dst_DECL, const void *actionlist)
 #ifdef DASM_CHECKS
 #define CK(x, st) \
   do { if (!(x)) { \
-    D->status = DASM_S_##st|(p-D->actionlist-1); return; } } while (0)
+    D->status = DASM_S_##st|(int)(p-D->actionlist-1); return; } } while (0)
 #define CKPL(kind, st) \
   do { if ((size_t)((char *)pl-(char *)D->kind##labels) >= D->kind##size) { \
-    D->status = DASM_S_RANGE_##st|(p-D->actionlist-1); return; } } while (0)
+    D->status = DASM_S_RANGE_##st|(int)(p-D->actionlist-1); return; } } while (0)
 #else
 #define CK(x, st)	((void)0)
 #define CKPL(kind, st)	((void)0)
@@ -231,7 +231,7 @@ void dasm_put(Dst_DECL, int start, ...)
 	*pl = -pos;  /* Label exists now. */
 	b[pos++] = ofs;  /* Store pass1 offset estimate. */
 	break;
-      case DASM_IMM:
+      case DASM_IMM: case DASM_IMMS:
 #ifdef DASM_CHECKS
 	CK((n & ((1<<((ins>>10)&31))-1)) == 0, RANGE_I);
 #endif
@@ -273,7 +273,7 @@ int dasm_link(Dst_DECL, size_t *szp)
 
   { /* Handle globals not defined in this translation unit. */
     int idx;
-    for (idx = 20; idx*sizeof(int) < D->lgsize; idx++) {
+    for (idx = 10; idx*sizeof(int) < D->lgsize; idx++) {
       int n = D->lglabels[idx];
       /* Undefined label: Collapse rel chain and replace with marker (< 0). */
       while (n > 0) { int *pb = DASM_POS2PTR(D, n); n = *pb; *pb = -idx; }
@@ -299,7 +299,7 @@ int dasm_link(Dst_DECL, size_t *szp)
 	case DASM_ALIGN: ofs -= (b[pos++] + ofs) & (ins & 255); break;
 	case DASM_REL_LG: case DASM_REL_PC: pos++; break;
 	case DASM_LABEL_LG: case DASM_LABEL_PC: b[pos++] += ofs; break;
-	case DASM_IMM: pos++; break;
+	case DASM_IMM: case DASM_IMMS: pos++; break;
 	}
       }
       stop: (void)0;
@@ -314,7 +314,7 @@ int dasm_link(Dst_DECL, size_t *szp)
 
 #ifdef DASM_CHECKS
 #define CK(x, st) \
-  do { if (!(x)) return DASM_S_##st|(p-D->actionlist-1); } while (0)
+  do { if (!(x)) return DASM_S_##st|(int)(p-D->actionlist-1); } while (0)
 #else
 #define CK(x, st)	((void)0)
 #endif
@@ -349,24 +349,32 @@ int dasm_encode(Dst_DECL, void *buffer)
 	  ins &= 255; while ((((char *)cp - base) & ins)) *cp++ = 0x60000000;
 	  break;
 	case DASM_REL_LG:
-	  CK(n >= 0, UNDEF_LG);
+	  if (n < 0) {
+	    n = (int)((ptrdiff_t)D->globals[-n] - (ptrdiff_t)cp);
+	    goto patchrel;
+	  }
+	  /* fallthrough */
 	case DASM_REL_PC:
 	  CK(n >= 0, UNDEF_PC);
 	  n = *DASM_POS2PTR(D, n);
 	  if (ins & 2048)
-	    n = n - (int)((char *)cp - base);
+	    n = (n + (int)(size_t)base) & 0x0fffffff;
 	  else
-	    n = (n + (int)base) & 0x0fffffff;
-	patchrel:
+	    n = n - (int)((char *)cp - base);
+	patchrel: {
+	  unsigned int e = 16 + ((ins >> 12) & 15);
 	  CK((n & 3) == 0 &&
-	     ((n + ((ins & 2048) ? 0x00020000 : 0)) >>
-	       ((ins & 2048) ? 18 : 28)) == 0, RANGE_REL);
-	  cp[-1] |= ((n>>2) & ((ins & 2048) ? 0x0000ffff: 0x03ffffff));
+	     ((n + ((ins & 2048) ? 0 : (1<<(e+1)))) >> (e+2)) == 0, RANGE_REL);
+	  cp[-1] |= ((n>>2) & ((1<<e)-1));
+	  }
 	  break;
 	case DASM_LABEL_LG:
 	  ins &= 2047; if (ins >= 20) D->globals[ins-10] = (void *)(base + n);
 	  break;
 	case DASM_LABEL_PC: break;
+	case DASM_IMMS:
+	  cp[-1] |= ((n>>3) & 4); n &= 0x1f;
+	  /* fallthrough */
 	case DASM_IMM:
 	  cp[-1] |= (n & ((1<<((ins>>5)&31))-1)) << (ins&31);
 	  break;
@@ -409,7 +417,7 @@ int dasm_checkstep(Dst_DECL, int secmatch)
   }
   if (D->status == DASM_S_OK && secmatch >= 0 &&
       D->section != &D->sections[secmatch])
-    D->status = DASM_S_MATCH_SEC|(D->section-D->sections);
+    D->status = DASM_S_MATCH_SEC|(int)(D->section-D->sections);
   return D->status;
 }
 #endif
