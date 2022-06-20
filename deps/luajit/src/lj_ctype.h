@@ -1,6 +1,6 @@
 /*
 ** C type management.
-** Copyright (C) 2005-2014 Mike Pall. See Copyright Notice in luajit.h
+** Copyright (C) 2005-2022 Mike Pall. See Copyright Notice in luajit.h
 */
 
 #ifndef _LJ_CTYPE_H
@@ -42,18 +42,18 @@ LJ_STATIC_ASSERT(((int)CT_STRUCT & (int)CT_ARRAY) == CT_STRUCT);
 **  ---------- info ------------
 ** |type      flags...  A   cid | size   |  sib  | next  | name  |
 ** +----------------------------+--------+-------+-------+-------+--
-** |NUM       BFvcUL..  A       | size   |       | type  |       |
-** |STRUCT    ..vcU..V  A       | size   | field | name? | name? |
-** |PTR       ..vcR...  A   cid | size   |       | type  |       |
-** |ARRAY     VCvc...V  A   cid | size   |       | type  |       |
-** |VOID      ..vc....  A       | size   |       | type  |       |
+** |NUM       BFcvUL..  A       | size   |       | type  |       |
+** |STRUCT    ..cvU..V  A       | size   | field | name? | name? |
+** |PTR       ..cvR...  A   cid | size   |       | type  |       |
+** |ARRAY     VCcv...V  A   cid | size   |       | type  |       |
+** |VOID      ..cv....  A       | size   |       | type  |       |
 ** |ENUM                A   cid | size   | const | name? | name? |
 ** |FUNC      ....VS.. cc   cid | nargs  | field | name? | name? |
 ** |TYPEDEF                 cid |        |       | name  | name  |
 ** |ATTRIB        attrnum   cid | attr   | sib?  | type? |       |
 ** |FIELD                   cid | offset | field |       | name? |
-** |BITFIELD  B.vcU csz bsz pos | offset | field |       | name? |
-** |CONSTVAL     c          cid | value  | const | name  | name  |
+** |BITFIELD  B.cvU csz bsz pos | offset | field |       | name? |
+** |CONSTVAL    c           cid | value  | const | name  | name  |
 ** |EXTERN                  cid |        | sib?  | name  | name  |
 ** |KW                      tok | size   |       | name  | name  |
 ** +----------------------------+--------+-------+-------+-------+--
@@ -260,10 +260,16 @@ typedef struct CTState {
 
 #define CT_MEMALIGN	3	/* Alignment guaranteed by memory allocator. */
 
+#ifdef LUA_USE_ASSERT
+#define lj_assertCTS(c, ...)	(lj_assertG_(cts->g, (c), __VA_ARGS__))
+#else
+#define lj_assertCTS(c, ...)	((void)cts)
+#endif
+
 /* -- Predefined types ---------------------------------------------------- */
 
 /* Target-dependent types. */
-#if LJ_TARGET_PPC || LJ_TARGET_PPCSPE
+#if LJ_TARGET_PPC
 #define CTTYDEFP(_) \
   _(LINT32,		4,	CT_NUM, CTF_LONG|CTALIGN(2))
 #else
@@ -292,6 +298,7 @@ typedef struct CTState {
   _(P_VOID,	CTSIZE_PTR,	CT_PTR, CTALIGN_PTR|CTID_VOID) \
   _(P_CVOID,	CTSIZE_PTR,	CT_PTR, CTALIGN_PTR|CTID_CVOID) \
   _(P_CCHAR,	CTSIZE_PTR,	CT_PTR, CTALIGN_PTR|CTID_CCHAR) \
+  _(P_UINT8,	CTSIZE_PTR,	CT_PTR, CTALIGN_PTR|CTID_UINT8) \
   _(A_CCHAR,		-1,	CT_ARRAY, CTF_CONST|CTALIGN(0)|CTID_CCHAR) \
   _(CTYPEID,		4,	CT_ENUM, CTALIGN(2)|CTID_INT32) \
   CTTYDEFP(_) \
@@ -383,6 +390,16 @@ static LJ_AINLINE CTState *ctype_cts(lua_State *L)
   return cts;
 }
 
+/* Load FFI library on-demand. */
+#define ctype_loadffi(L) \
+  do { \
+    if (!ctype_ctsG(G(L))) { \
+      ptrdiff_t oldtop = (char *)L->top - mref(L->stack, char); \
+      luaopen_ffi(L); \
+      L->top = (TValue *)(mref(L->stack, char) + oldtop); \
+    } \
+  } while (0)
+
 /* Save and restore state of C type table. */
 #define LJ_CTYPE_SAVE(cts)	CTState savects_ = *(cts)
 #define LJ_CTYPE_RESTORE(cts) \
@@ -392,7 +409,8 @@ static LJ_AINLINE CTState *ctype_cts(lua_State *L)
 /* Check C type ID for validity when assertions are enabled. */
 static LJ_AINLINE CTypeID ctype_check(CTState *cts, CTypeID id)
 {
-  lua_assert(id > 0 && id < cts->top); UNUSED(cts);
+  UNUSED(cts);
+  lj_assertCTS(id > 0 && id < cts->top, "bad CTID %d", id);
   return id;
 }
 
@@ -408,8 +426,9 @@ static LJ_AINLINE CType *ctype_get(CTState *cts, CTypeID id)
 /* Get child C type. */
 static LJ_AINLINE CType *ctype_child(CTState *cts, CType *ct)
 {
-  lua_assert(!(ctype_isvoid(ct->info) || ctype_isstruct(ct->info) ||
-	     ctype_isbitfield(ct->info)));  /* These don't have children. */
+  lj_assertCTS(!(ctype_isvoid(ct->info) || ctype_isstruct(ct->info) ||
+	       ctype_isbitfield(ct->info)),
+	       "ctype %08x has no children", ct->info);
   return ctype_get(cts, ctype_cid(ct->info));
 }
 

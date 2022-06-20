@@ -1,6 +1,6 @@
 /*
 ** VM error messages.
-** Copyright (C) 2005-2014 Mike Pall. See Copyright Notice in luajit.h
+** Copyright (C) 2005-2022 Mike Pall. See Copyright Notice in luajit.h
 */
 
 /* This file may be included multiple times with different ERRDEF macros. */
@@ -67,6 +67,7 @@ ERRDEF(PROTMT,	"cannot change a protected metatable")
 ERRDEF(UNPACK,	"too many results to unpack")
 ERRDEF(RDRSTR,	"reader function must return a string")
 ERRDEF(PRTOSTR,	LUA_QL("tostring") " must return a string to " LUA_QL("print"))
+ERRDEF(NUMRNG,	"number out of range")
 ERRDEF(IDXRNG,	"index out of range")
 ERRDEF(BASERNG,	"base out of range")
 ERRDEF(LVLRNG,	"level out of range")
@@ -96,18 +97,12 @@ ERRDEF(STRPATX,	"pattern too complex")
 ERRDEF(STRCAPI,	"invalid capture index")
 ERRDEF(STRCAPN,	"too many captures")
 ERRDEF(STRCAPU,	"unfinished capture")
-ERRDEF(STRFMTO,	"invalid option " LUA_QL("%%%c") " to " LUA_QL("format"))
-ERRDEF(STRFMTR,	"invalid format (repeated flags)")
-ERRDEF(STRFMTW,	"invalid format (width or precision too long)")
+ERRDEF(STRFMT,	"invalid option " LUA_QS " to " LUA_QL("format"))
 ERRDEF(STRGSRV,	"invalid replacement value (a %s)")
 ERRDEF(BADMODN,	"name conflict for module " LUA_QS)
 #if LJ_HASJIT
 ERRDEF(JITPROT,	"runtime code generation failed, restricted kernel?")
-#if LJ_TARGET_X86ORX64
-ERRDEF(NOJIT,	"JIT compiler disabled, CPU does not support SSE2")
-#else
 ERRDEF(NOJIT,	"JIT compiler disabled")
-#endif
 #elif defined(LJ_ARCH_NOJIT)
 ERRDEF(NOJIT,	"no JIT compiler for this architecture (yet)")
 #else
@@ -118,7 +113,6 @@ ERRDEF(JITOPT,	"unknown or malformed optimization flag " LUA_QS)
 /* Lexer/parser errors. */
 ERRDEF(XMODE,	"attempt to load chunk with wrong mode")
 ERRDEF(XNEAR,	"%s near " LUA_QS)
-ERRDEF(XELEM,	"lexical element too long")
 ERRDEF(XLINES,	"chunk has too many lines")
 ERRDEF(XLEVELS,	"chunk has too many syntax levels")
 ERRDEF(XNUMBER,	"malformed number")
@@ -184,6 +178,19 @@ ERRDEF(FFI_CBACKOV,	"too many callbacks")
 #endif
 ERRDEF(FFI_NYIPACKBIT,	"NYI: packed bit fields")
 ERRDEF(FFI_NYICALL,	"NYI: cannot call this C function (yet)")
+#endif
+
+#if LJ_HASBUFFER
+/* String buffer errors. */
+ERRDEF(BUFFER_SELF,	"cannot put buffer into itself")
+ERRDEF(BUFFER_BADOPT,	"bad options table")
+ERRDEF(BUFFER_BADENC,	"cannot serialize " LUA_QS)
+ERRDEF(BUFFER_BADDEC,	"cannot deserialize tag 0x%02x")
+ERRDEF(BUFFER_BADDICTX,	"cannot deserialize dictionary index %d")
+ERRDEF(BUFFER_DEPTH,	"too deep to serialize")
+ERRDEF(BUFFER_DUPKEY,	"duplicate table key")
+ERRDEF(BUFFER_EOB,	"unexpected end of buffer")
+ERRDEF(BUFFER_LEFTOV,	"left-over data in buffer")
 #endif
 
 #undef ERRDEF

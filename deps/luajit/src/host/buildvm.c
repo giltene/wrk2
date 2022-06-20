@@ -1,6 +1,6 @@
 /*
 ** LuaJIT VM builder.
-** Copyright (C) 2005-2014 Mike Pall. See Copyright Notice in luajit.h
+** Copyright (C) 2005-2022 Mike Pall. See Copyright Notice in luajit.h
 **
 ** This is a tool to build the hand-tuned assembler code required for
 ** LuaJIT's bytecode interpreter. It supports a variety of output formats
@@ -18,8 +18,10 @@
 #include "lj_obj.h"
 #include "lj_gc.h"
 #include "lj_bc.h"
+#if LJ_HASJIT
 #include "lj_ir.h"
 #include "lj_ircall.h"
+#endif
 #include "lj_frame.h"
 #include "lj_dispatch.h"
 #if LJ_HASFFI
@@ -59,9 +61,9 @@ static int collect_reloc(BuildCtx *ctx, uint8_t *addr, int idx, int type);
 #include "../dynasm/dasm_x86.h"
 #elif LJ_TARGET_ARM
 #include "../dynasm/dasm_arm.h"
+#elif LJ_TARGET_ARM64
+#include "../dynasm/dasm_arm64.h"
 #elif LJ_TARGET_PPC
-#include "../dynasm/dasm_ppc.h"
-#elif LJ_TARGET_PPCSPE
 #include "../dynasm/dasm_ppc.h"
 #elif LJ_TARGET_MIPS
 #include "../dynasm/dasm_mips.h"
@@ -110,11 +112,11 @@ static const char *sym_decorate(BuildCtx *ctx,
   if (p) {
 #if LJ_TARGET_X86ORX64
     if (!LJ_64 && (ctx->mode == BUILD_coffasm || ctx->mode == BUILD_peobj))
-      name[0] = '@';
+      name[0] = name[1] == 'R' ? '_' : '@';  /* Just for _RtlUnwind@16. */
     else
       *p = '\0';
-#elif (LJ_TARGET_PPC  || LJ_TARGET_PPCSPE) && !LJ_TARGET_CONSOLE
-    /* Keep @plt. */
+#elif LJ_TARGET_PPC && !LJ_TARGET_CONSOLE
+    /* Keep @plt etc. */
 #else
     *p = '\0';
 #endif
@@ -179,6 +181,7 @@ static int build_code(BuildCtx *ctx)
   ctx->nreloc = 0;
 
   ctx->globnames = globnames;
+  ctx->extnames = extnames;
   ctx->relocsym = (const char **)malloc(NRELOCSYM*sizeof(const char *));
   ctx->nrelocsym = 0;
   for (i = 0; i < (int)NRELOCSYM; i++) relocmap[i] = -1;
@@ -249,6 +252,7 @@ BCDEF(BCNAME)
   NULL
 };
 
+#if LJ_HASJIT
 const char *const ir_names[] = {
 #define IRNAME(name, m, m1, m2)	#name,
 IRDEF(IRNAME)
@@ -289,7 +293,9 @@ static const char *const trace_errors[] = {
 #include "lj_traceerr.h"
   NULL
 };
+#endif
 
+#if LJ_HASJIT
 static const char *lower(char *buf, const char *s)
 {
   char *p = buf;
@@ -300,6 +306,7 @@ static const char *lower(char *buf, const char *s)
   *p = '\0';
   return buf;
 }
+#endif
 
 /* Emit C source code for bytecode-related definitions. */
 static void emit_bcdef(BuildCtx *ctx)
@@ -317,23 +324,26 @@ static void emit_bcdef(BuildCtx *ctx)
 /* Emit VM definitions as Lua code for debug modules. */
 static void emit_vmdef(BuildCtx *ctx)
 {
+#if LJ_HASJIT
   char buf[80];
+#endif
   int i;
   fprintf(ctx->fp, "-- This is a generated file. DO NOT EDIT!\n\n");
-  fprintf(ctx->fp, "module(...)\n\n");
+  fprintf(ctx->fp, "return {\n\n");
 
   fprintf(ctx->fp, "bcnames = \"");
   for (i = 0; bc_names[i]; i++) fprintf(ctx->fp, "%-6s", bc_names[i]);
-  fprintf(ctx->fp, "\"\n\n");
+  fprintf(ctx->fp, "\",\n\n");
 
+#if LJ_HASJIT
   fprintf(ctx->fp, "irnames = \"");
   for (i = 0; ir_names[i]; i++) fprintf(ctx->fp, "%-6s", ir_names[i]);
-  fprintf(ctx->fp, "\"\n\n");
+  fprintf(ctx->fp, "\",\n\n");
 
   fprintf(ctx->fp, "irfpm = { [0]=");
   for (i = 0; irfpm_names[i]; i++)
     fprintf(ctx->fp, "\"%s\", ", lower(buf, irfpm_names[i]));
-  fprintf(ctx->fp, "}\n\n");
+  fprintf(ctx->fp, "},\n\n");
 
   fprintf(ctx->fp, "irfield = { [0]=");
   for (i = 0; irfield_names[i]; i++) {
@@ -343,17 +353,18 @@ static void emit_vmdef(BuildCtx *ctx)
     if (p) *p = '.';
     fprintf(ctx->fp, "\"%s\", ", buf);
   }
-  fprintf(ctx->fp, "}\n\n");
+  fprintf(ctx->fp, "},\n\n");
 
   fprintf(ctx->fp, "ircall = {\n[0]=");
   for (i = 0; ircall_names[i]; i++)
     fprintf(ctx->fp, "\"%s\",\n", ircall_names[i]);
-  fprintf(ctx->fp, "}\n\n");
+  fprintf(ctx->fp, "},\n\n");
 
   fprintf(ctx->fp, "traceerr = {\n[0]=");
   for (i = 0; trace_errors[i]; i++)
     fprintf(ctx->fp, "\"%s\",\n", trace_errors[i]);
-  fprintf(ctx->fp, "}\n\n");
+  fprintf(ctx->fp, "},\n\n");
+#endif
 }
 
 /* -- Argument parsing ---------------------------------------------------- */
@@ -490,6 +501,7 @@ int main(int argc, char **argv)
   case BUILD_vmdef:
     emit_vmdef(ctx);
     emit_lib(ctx);
+    fprintf(ctx->fp, "}\n\n");
     break;
   case BUILD_ffdef:
   case BUILD_libdef:

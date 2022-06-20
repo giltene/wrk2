@@ -1,6 +1,6 @@
 /*
 ** String scanning.
-** Copyright (C) 2005-2014 Mike Pall. See Copyright Notice in luajit.h
+** Copyright (C) 2005-2022 Mike Pall. See Copyright Notice in luajit.h
 */
 
 #include <math.h>
@@ -63,6 +63,7 @@
 #define STRSCAN_MAXDIG	800		/* 772 + extra are sufficient. */
 #define STRSCAN_DDIG	(STRSCAN_DIG/2)
 #define STRSCAN_DMASK	(STRSCAN_DDIG-1)
+#define STRSCAN_MAXEXP	(1 << 20)
 
 /* Helpers for circular buffer. */
 #define DNEXT(a)	(((a)+1) & STRSCAN_DMASK)
@@ -79,7 +80,7 @@ static void strscan_double(uint64_t x, TValue *o, int32_t ex2, int32_t neg)
   /* Avoid double rounding for denormals. */
   if (LJ_UNLIKELY(ex2 <= -1075 && x != 0)) {
     /* NYI: all of this generates way too much code on 32 bit CPUs. */
-#if defined(__GNUC__) && LJ_64
+#if (defined(__GNUC__) || defined(__clang__)) && LJ_64
     int32_t b = (int32_t)(__builtin_clzll(x)^63);
 #else
     int32_t b = (x>>32) ? 32+(int32_t)lj_fls((uint32_t)(x>>32)) :
@@ -93,7 +94,7 @@ static void strscan_double(uint64_t x, TValue *o, int32_t ex2, int32_t neg)
   }
 
   /* Convert to double using a signed int64_t conversion, then rescale. */
-  lua_assert((int64_t)x >= 0);
+  lj_assertX((int64_t)x >= 0, "bad double conversion");
   n = (double)(int64_t)x;
   if (neg) n = -n;
   if (ex2) n = ldexp(n, ex2);
@@ -121,7 +122,8 @@ static StrScanFmt strscan_hex(const uint8_t *p, TValue *o,
   /* Format-specific handling. */
   switch (fmt) {
   case STRSCAN_INT:
-    if (!(opt & STRSCAN_OPT_TONUM) && x < 0x80000000u+neg) {
+    if (!(opt & STRSCAN_OPT_TONUM) && x < 0x80000000u+neg &&
+	!(x == 0 && neg)) {
       o->i = neg ? -(int32_t)x : (int32_t)x;
       return STRSCAN_INT;  /* Fast path for 32 bit integers. */
     }
@@ -140,7 +142,7 @@ static StrScanFmt strscan_hex(const uint8_t *p, TValue *o,
     break;
   }
 
-  /* Reduce range then convert to double. */
+  /* Reduce range, then convert to double. */
   if ((x & U64x(c0000000,0000000))) { x = (x >> 2) | (x & 3); ex2 += 2; }
   strscan_double(x, o, ex2, neg);
   return fmt;
@@ -199,7 +201,7 @@ static StrScanFmt strscan_dec(const uint8_t *p, TValue *o,
       *xip++ = d + ((*p != '.' ? *p : *++p) & 15); p++;
     }
     /* Scan and realign trailing digit. */
-    if (i) *xip++ = 10 * ((*p != '.' ? *p : *++p) & 15), ex10--, p++;
+    if (i) *xip++ = 10 * ((*p != '.' ? *p : *++p) & 15), ex10--, dig++, p++;
 
     /* Summarize rounding-effect of excess digits. */
     if (dig > STRSCAN_MAXDIG) {
@@ -262,7 +264,7 @@ static StrScanFmt strscan_dec(const uint8_t *p, TValue *o,
     uint32_t hi = 0, lo = (uint32_t)(xip-xi);
     int32_t ex2 = 0, idig = (int32_t)lo + (ex10 >> 1);
 
-    lua_assert(lo > 0 && (ex10 & 1) == 0);
+    lj_assertX(lo > 0 && (ex10 & 1) == 0, "bad lo %d ex10 %d", lo, ex10);
 
     /* Handle simple overflow/underflow. */
     if (idig > 310/2) { if (neg) setminfV(o); else setpinfV(o); return fmt; }
@@ -289,14 +291,15 @@ static StrScanFmt strscan_dec(const uint8_t *p, TValue *o,
 
     /* Scale down until no more than 17 or 18 integer part digits remain. */
     while (idig > 9) {
-      uint32_t i, cy = 0;
+      uint32_t i = hi, cy = 0;
       ex2 += 6;
-      for (i = hi; i != lo; i = DNEXT(i)) {
+      do {
 	cy += xi[i];
 	xi[i] = (cy >> 6);
 	cy = 100 * (cy & 0x3f);
 	if (xi[i] == 0 && i == hi) hi = DNEXT(hi), idig--;
-      }
+	i = DNEXT(i);
+      } while (i != lo);
       while (cy) {
 	if (hi == lo) { xi[DPREV(lo)] |= 1; break; }
 	xi[lo] = (cy >> 6); lo = DNEXT(lo);
@@ -325,10 +328,55 @@ static StrScanFmt strscan_dec(const uint8_t *p, TValue *o,
   return fmt;
 }
 
+/* Parse binary number. */
+static StrScanFmt strscan_bin(const uint8_t *p, TValue *o,
+			      StrScanFmt fmt, uint32_t opt,
+			      int32_t ex2, int32_t neg, uint32_t dig)
+{
+  uint64_t x = 0;
+  uint32_t i;
+
+  if (ex2 || dig > 64) return STRSCAN_ERROR;
+
+  /* Scan binary digits. */
+  for (i = dig; i; i--, p++) {
+    if ((*p & ~1) != '0') return STRSCAN_ERROR;
+    x = (x << 1) | (*p & 1);
+  }
+
+  /* Format-specific handling. */
+  switch (fmt) {
+  case STRSCAN_INT:
+    if (!(opt & STRSCAN_OPT_TONUM) && x < 0x80000000u+neg) {
+      o->i = neg ? -(int32_t)x : (int32_t)x;
+      return STRSCAN_INT;  /* Fast path for 32 bit integers. */
+    }
+    if (!(opt & STRSCAN_OPT_C)) { fmt = STRSCAN_NUM; break; }
+    /* fallthrough */
+  case STRSCAN_U32:
+    if (dig > 32) return STRSCAN_ERROR;
+    o->i = neg ? -(int32_t)x : (int32_t)x;
+    return STRSCAN_U32;
+  case STRSCAN_I64:
+  case STRSCAN_U64:
+    o->u64 = neg ? (uint64_t)-(int64_t)x : x;
+    return fmt;
+  default:
+    break;
+  }
+
+  /* Reduce range, then convert to double. */
+  if ((x & U64x(c0000000,0000000))) { x = (x >> 2) | (x & 3); ex2 += 2; }
+  strscan_double(x, o, ex2, neg);
+  return fmt;
+}
+
 /* Scan string containing a number. Returns format. Returns value in o. */
-StrScanFmt lj_strscan_scan(const uint8_t *p, TValue *o, uint32_t opt)
+StrScanFmt lj_strscan_scan(const uint8_t *p, MSize len, TValue *o,
+			   uint32_t opt)
 {
   int32_t neg = 0;
+  const uint8_t *pe = p + len;
 
   /* Remove leading space, parse sign and non-numbers. */
   if (LJ_UNLIKELY(!lj_char_isdigit(*p))) {
@@ -346,7 +394,7 @@ StrScanFmt lj_strscan_scan(const uint8_t *p, TValue *o, uint32_t opt)
 	p += 3;
       }
       while (lj_char_isspace(*p)) p++;
-      if (*p) return STRSCAN_ERROR;
+      if (*p || p < pe) return STRSCAN_ERROR;
       o->u64 = tmp.u64;
       return STRSCAN_NUM;
     }
@@ -363,8 +411,12 @@ StrScanFmt lj_strscan_scan(const uint8_t *p, TValue *o, uint32_t opt)
 
     /* Determine base and skip leading zeros. */
     if (LJ_UNLIKELY(*p <= '0')) {
-      if (*p == '0' && casecmp(p[1], 'x'))
-	base = 16, cmask = LJ_CHAR_XDIGIT, p += 2;
+      if (*p == '0') {
+	if (casecmp(p[1], 'x'))
+	  base = 16, cmask = LJ_CHAR_XDIGIT, p += 2;
+	else if (casecmp(p[1], 'b'))
+	  base = 2, cmask = LJ_CHAR_DIGIT, p += 2;
+      }
       for ( ; ; p++) {
 	if (*p == '0') {
 	  hasdig = 1;
@@ -393,16 +445,18 @@ StrScanFmt lj_strscan_scan(const uint8_t *p, TValue *o, uint32_t opt)
 
     /* Handle decimal point. */
     if (dp) {
+      if (base == 2) return STRSCAN_ERROR;
       fmt = STRSCAN_NUM;
       if (dig) {
 	ex = (int32_t)(dp-(p-1)); dp = p-1;
 	while (ex < 0 && *dp-- == '0') ex++, dig--;  /* Skip trailing zeros. */
+	if (ex <= -STRSCAN_MAXEXP) return STRSCAN_ERROR;
 	if (base == 16) ex *= 4;
       }
     }
 
     /* Parse exponent. */
-    if (casecmp(*p, (uint32_t)(base == 16 ? 'p' : 'e'))) {
+    if (base >= 10 && casecmp(*p, (uint32_t)(base == 16 ? 'p' : 'e'))) {
       uint32_t xx;
       int negx = 0;
       fmt = STRSCAN_NUM; p++;
@@ -410,7 +464,8 @@ StrScanFmt lj_strscan_scan(const uint8_t *p, TValue *o, uint32_t opt)
       if (!lj_char_isdigit(*p)) return STRSCAN_ERROR;
       xx = (*p++ & 15);
       while (lj_char_isdigit(*p)) {
-	if (xx < 65536) xx = xx * 10 + (*p & 15);
+	xx = xx * 10 + (*p & 15);
+	if (xx >= STRSCAN_MAXEXP) return STRSCAN_ERROR;
 	p++;
       }
       ex += negx ? -(int32_t)xx : (int32_t)xx;
@@ -440,16 +495,19 @@ StrScanFmt lj_strscan_scan(const uint8_t *p, TValue *o, uint32_t opt)
       while (lj_char_isspace(*p)) p++;
       if (*p) return STRSCAN_ERROR;
     }
+    if (p < pe) return STRSCAN_ERROR;
 
     /* Fast path for decimal 32 bit integers. */
     if (fmt == STRSCAN_INT && base == 10 &&
 	(dig < 10 || (dig == 10 && *sp <= '2' && x < 0x80000000u+neg))) {
-      int32_t y = neg ? -(int32_t)x : (int32_t)x;
       if ((opt & STRSCAN_OPT_TONUM)) {
-	o->n = (double)y;
+	o->n = neg ? -(double)x : (double)x;
+	return STRSCAN_NUM;
+      } else if (x == 0 && neg) {
+	o->n = -0.0;
 	return STRSCAN_NUM;
       } else {
-	o->i = y;
+	o->i = neg ? -(int32_t)x : (int32_t)x;
 	return STRSCAN_INT;
       }
     }
@@ -459,11 +517,13 @@ StrScanFmt lj_strscan_scan(const uint8_t *p, TValue *o, uint32_t opt)
       return strscan_oct(sp, o, fmt, neg, dig);
     if (base == 16)
       fmt = strscan_hex(sp, o, fmt, opt, ex, neg, dig);
+    else if (base == 2)
+      fmt = strscan_bin(sp, o, fmt, opt, ex, neg, dig);
     else
       fmt = strscan_dec(sp, o, fmt, opt, ex, neg, dig);
 
     /* Try to convert number to integer, if requested. */
-    if (fmt == STRSCAN_NUM && (opt & STRSCAN_OPT_TOINT)) {
+    if (fmt == STRSCAN_NUM && (opt & STRSCAN_OPT_TOINT) && !tvismzero(o)) {
       double n = o->n;
       int32_t i = lj_num2int(n);
       if (n == (lua_Number)i) { o->i = i; return STRSCAN_INT; }
@@ -474,18 +534,19 @@ StrScanFmt lj_strscan_scan(const uint8_t *p, TValue *o, uint32_t opt)
 
 int LJ_FASTCALL lj_strscan_num(GCstr *str, TValue *o)
 {
-  StrScanFmt fmt = lj_strscan_scan((const uint8_t *)strdata(str), o,
+  StrScanFmt fmt = lj_strscan_scan((const uint8_t *)strdata(str), str->len, o,
 				   STRSCAN_OPT_TONUM);
-  lua_assert(fmt == STRSCAN_ERROR || fmt == STRSCAN_NUM);
+  lj_assertX(fmt == STRSCAN_ERROR || fmt == STRSCAN_NUM, "bad scan format");
   return (fmt != STRSCAN_ERROR);
 }
 
 #if LJ_DUALNUM
 int LJ_FASTCALL lj_strscan_number(GCstr *str, TValue *o)
 {
-  StrScanFmt fmt = lj_strscan_scan((const uint8_t *)strdata(str), o,
+  StrScanFmt fmt = lj_strscan_scan((const uint8_t *)strdata(str), str->len, o,
 				   STRSCAN_OPT_TOINT);
-  lua_assert(fmt == STRSCAN_ERROR || fmt == STRSCAN_NUM || fmt == STRSCAN_INT);
+  lj_assertX(fmt == STRSCAN_ERROR || fmt == STRSCAN_NUM || fmt == STRSCAN_INT,
+	     "bad scan format");
   if (fmt == STRSCAN_INT) setitype(o, LJ_TISNUM);
   return (fmt != STRSCAN_ERROR);
 }

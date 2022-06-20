@@ -1,7 +1,7 @@
 ----------------------------------------------------------------------------
 -- LuaJIT compiler dump module.
 --
--- Copyright (C) 2005-2014 Mike Pall. All rights reserved.
+-- Copyright (C) 2005-2022 Mike Pall. All rights reserved.
 -- Released under the MIT license. See Copyright Notice in luajit.h
 ----------------------------------------------------------------------------
 --
@@ -55,7 +55,7 @@
 
 -- Cache some library functions and objects.
 local jit = require("jit")
-assert(jit.version_num == 20003, "LuaJIT core/library version mismatch")
+assert(jit.version_num == 20100, "LuaJIT core/library version mismatch")
 local jutil = require("jit.util")
 local vmdef = require("jit.vmdef")
 local funcinfo, funcbc = jutil.funcinfo, jutil.funcbc
@@ -63,9 +63,9 @@ local traceinfo, traceir, tracek = jutil.traceinfo, jutil.traceir, jutil.tracek
 local tracemc, tracesnap = jutil.tracemc, jutil.tracesnap
 local traceexitstub, ircalladdr = jutil.traceexitstub, jutil.ircalladdr
 local bit = require("bit")
-local band, shl, shr = bit.band, bit.lshift, bit.rshift
+local band, shr, tohex = bit.band, bit.rshift, bit.tohex
 local sub, gsub, format = string.sub, string.gsub, string.format
-local byte, char, rep = string.byte, string.char, string.rep
+local byte, rep = string.byte, string.rep
 local type, tostring = type, tostring
 local stdout, stderr = io.stdout, io.stderr
 
@@ -85,12 +85,13 @@ local nexitsym = 0
 local function fillsymtab_tr(tr, nexit)
   local t = {}
   symtabmt.__index = t
-  if jit.arch == "mips" or jit.arch == "mipsel" then
+  if jit.arch:sub(1, 4) == "mips" then
     t[traceexitstub(tr, 0)] = "exit"
     return
   end
   for i=0,nexit-1 do
     local addr = traceexitstub(tr, i)
+    if addr < 0 then addr = addr + 2^32 end
     t[addr] = tostring(i)
   end
   local addr = traceexitstub(tr, nexit)
@@ -101,10 +102,15 @@ end
 local function fillsymtab(tr, nexit)
   local t = symtab
   if nexitsym == 0 then
+    local maskaddr = jit.arch == "arm" and -2
     local ircall = vmdef.ircall
     for i=0,#ircall do
       local addr = ircalladdr(i)
-      if addr ~= 0 then t[addr] = ircall[i] end
+      if addr ~= 0 then
+	if maskaddr then addr = band(addr, maskaddr) end
+	if addr < 0 then addr = addr + 2^32 end
+	t[addr] = ircall[i]
+      end
     end
   end
   if nexitsym == 1000000 then -- Per-trace exit stubs.
@@ -118,6 +124,7 @@ local function fillsymtab(tr, nexit)
 	nexit = 1000000
 	break
       end
+      if addr < 0 then addr = addr + 2^32 end
       t[addr] = tostring(i)
     end
     nexitsym = nexit
@@ -136,6 +143,7 @@ local function dump_mcode(tr)
   local mcode, addr, loop = tracemc(tr)
   if not mcode then return end
   if not disass then disass = require("jit.dis_"..jit.arch) end
+  if addr < 0 then addr = addr + 2^32 end
   out:write("---- TRACE ", tr, " mcode ", #mcode, "\n")
   local ctx = disass.create(mcode, addr, dumpwrite)
   ctx.hexdump = 0
@@ -207,12 +215,14 @@ local colortype_ansi = {
   "\027[35m%s\027[m",
 }
 
-local function colorize_text(s, t)
+local function colorize_text(s)
   return s
 end
 
-local function colorize_ansi(s, t)
-  return format(colortype_ansi[t], s)
+local function colorize_ansi(s, t, extra)
+  local out = format(colortype_ansi[t], s)
+  if extra then out = "\027[3m"..out end
+  return out
 end
 
 local irtype_ansi = setmetatable({},
@@ -221,9 +231,10 @@ local irtype_ansi = setmetatable({},
 
 local html_escape = { ["<"] = "&lt;", [">"] = "&gt;", ["&"] = "&amp;", }
 
-local function colorize_html(s, t)
+local function colorize_html(s, t, extra)
   s = gsub(s, "[<>&]", html_escape)
-  return format('<span class="irt_%s">%s</span>', irtype_text[t], s)
+  return format('<span class="irt_%s%s">%s</span>',
+		irtype_text[t], extra and " irt_extra" or "", s)
 end
 
 local irtype_html = setmetatable({},
@@ -248,6 +259,7 @@ span.irt_tab { color: #c00000; }
 span.irt_udt, span.irt_lud { color: #00c0c0; }
 span.irt_num { color: #4040c0; }
 span.irt_int, span.irt_i8, span.irt_u8, span.irt_i16, span.irt_u16 { color: #b040b0; }
+span.irt_extra { font-style: italic; }
 </style>
 ]]
 
@@ -263,6 +275,7 @@ local litname = {
     if band(mode, 8) ~= 0 then s = s.."C" end
     if band(mode, 16) ~= 0 then s = s.."R" end
     if band(mode, 32) ~= 0 then s = s.."I" end
+    if band(mode, 64) ~= 0 then s = s.."K" end
     t[mode] = s
     return s
   end}),
@@ -270,16 +283,20 @@ local litname = {
   ["CONV  "] = setmetatable({}, { __index = function(t, mode)
     local s = irtype[band(mode, 31)]
     s = irtype[band(shr(mode, 5), 31)].."."..s
-    if band(mode, 0x400) ~= 0 then s = s.." trunc"
-    elseif band(mode, 0x800) ~= 0 then s = s.." sext" end
-    local c = shr(mode, 14)
-    if c == 2 then s = s.." index" elseif c == 3 then s = s.." check" end
+    if band(mode, 0x800) ~= 0 then s = s.." sext" end
+    local c = shr(mode, 12)
+    if c == 1 then s = s.." none"
+    elseif c == 2 then s = s.." index"
+    elseif c == 3 then s = s.." check" end
     t[mode] = s
     return s
   end}),
   ["FLOAD "] = vmdef.irfield,
   ["FREF  "] = vmdef.irfield,
   ["FPMATH"] = vmdef.irfpm,
+  ["TMPREF"] = { [0] = "", "IN", "OUT", "INOUT", "", "", "OUT2", "INOUT2" },
+  ["BUFHDR"] = { [0] = "RESET", "APPEND", "WRITE" },
+  ["TOSTR "] = { [0] = "INT", "NUM", "CHAR" },
 }
 
 local function ctlsub(c)
@@ -303,15 +320,19 @@ local function fmtfunc(func, pc)
   end
 end
 
-local function formatk(tr, idx)
+local function formatk(tr, idx, sn)
   local k, t, slot = tracek(tr, idx)
   local tn = type(k)
   local s
   if tn == "number" then
-    if k == 2^52+2^51 then
+    if t < 12 then
+      s = k == 0 and "NULL" or format("[0x%08x]", k)
+    elseif band(sn or 0, 0x30000) ~= 0 then
+      s = band(sn, 0x20000) ~= 0 and "contpc" or "ftsz"
+    elseif k == 2^52+2^51 then
       s = "bias"
     else
-      s = format("%+.14g", k)
+      s = format(0 < k and k < 0x1p-1026 and "%+a" or "%+.14g", k)
     end
   elseif tn == "string" then
     s = format(#k > 20 and '"%.20s"~' or '"%s"', gsub(k, "%c", ctlsub))
@@ -324,15 +345,17 @@ local function formatk(tr, idx)
       s = format("userdata:%p", k)
     else
       s = format("[%p]", k)
-      if s == "[0x00000000]" then s = "NULL" end
+      if s == "[NULL]" then s = "NULL" end
     end
   elseif t == 21 then -- int64_t
     s = sub(tostring(k), 1, -3)
     if sub(s, 1, 1) ~= "-" then s = "+"..s end
+  elseif sn == 0x1057fff then -- SNAP(1, SNAP_FRAME | SNAP_NORESTORE, REF_NIL)
+    return "----" -- Special case for LJ_FR2 slot 1.
   else
     s = tostring(k) -- For primitives.
   end
-  s = colorize(format("%-4s", s), t)
+  s = colorize(format("%-4s", s), t, band(sn or 0, 0x100000) ~= 0)
   if slot then
     s = format("%s @%d", s, slot)
   end
@@ -347,12 +370,12 @@ local function printsnap(tr, snap)
       n = n + 1
       local ref = band(sn, 0xffff) - 0x8000 -- REF_BIAS
       if ref < 0 then
-	out:write(formatk(tr, ref))
+	out:write(formatk(tr, ref, sn))
       elseif band(sn, 0x80000) ~= 0 then -- SNAP_SOFTFPNUM
 	out:write(colorize(format("%04d/%04d", ref, ref+1), 14))
       else
 	local m, ot, op1, op2 = traceir(tr, ref)
-	out:write(colorize(format("%04d", ref), band(ot, 31)))
+	out:write(colorize(format("%04d", ref), band(ot, 31), band(sn, 0x100000) ~= 0))
       end
       out:write(band(sn, 0x10000) == 0 and " " or "|") -- SNAP_FRAME
     else
@@ -545,7 +568,7 @@ local function dump_trace(what, tr, func, pc, otr, oex)
   if what == "start" then
     if dumpmode.H then out:write('<pre class="ljdump">\n') end
     out:write("---- TRACE ", tr, " ", what)
-    if otr then out:write(" ", otr, "/", oex) end
+    if otr then out:write(" ", otr, "/", oex == -1 and "stitch" or oex) end
     out:write(" ", fmtfunc(func, pc), "\n")
   elseif what == "stop" or what == "abort" then
     out:write("---- TRACE ", tr, " ", what)
@@ -564,13 +587,14 @@ local function dump_trace(what, tr, func, pc, otr, oex)
     end
     if dumpmode.H then out:write("</pre>\n\n") else out:write("\n") end
   else
+    if what == "flush" then symtab, nexitsym = {}, 0 end
     out:write("---- TRACE ", what, "\n\n")
   end
   out:flush()
 end
 
 -- Dump recorded bytecode.
-local function dump_record(tr, func, pc, depth, callee)
+local function dump_record(tr, func, pc, depth)
   if depth ~= recdepth then
     recdepth = depth
     recprefix = rep(" .", depth)
@@ -581,7 +605,6 @@ local function dump_record(tr, func, pc, depth, callee)
     if dumpmode.H then line = gsub(line, "[<>&]", html_escape) end
   else
     line = "0000 "..recprefix.." FUNCC      \n"
-    callee = func
   end
   if pc <= 0 then
     out:write(sub(line, 1, -2), "         ; ", fmtfunc(func), "\n")
@@ -595,23 +618,26 @@ end
 
 ------------------------------------------------------------------------------
 
+local gpr64 = jit.arch:match("64")
+local fprmips32 = jit.arch == "mips" or jit.arch == "mipsel"
+
 -- Dump taken trace exits.
 local function dump_texit(tr, ex, ngpr, nfpr, ...)
   out:write("---- TRACE ", tr, " exit ", ex, "\n")
   if dumpmode.X then
     local regs = {...}
-    if jit.arch == "x64" then
+    if gpr64 then
       for i=1,ngpr do
 	out:write(format(" %016x", regs[i]))
 	if i % 4 == 0 then out:write("\n") end
       end
     else
       for i=1,ngpr do
-	out:write(format(" %08x", regs[i]))
+	out:write(" ", tohex(regs[i]))
 	if i % 8 == 0 then out:write("\n") end
       end
     end
-    if jit.arch == "mips" or jit.arch == "mipsel" then
+    if fprmips32 then
       for i=1,nfpr,2 do
 	out:write(format(" %+17.14g", regs[ngpr+i]))
 	if i % 8 == 7 then out:write("\n") end
@@ -643,7 +669,8 @@ end
 local function dumpon(opt, outfile)
   if active then dumpoff() end
 
-  local colormode = os.getenv("COLORTERM") and "A" or "T"
+  local term = os.getenv("TERM")
+  local colormode = (term and term:match("color") or os.getenv("COLORTERM")) and "A" or "T"
   if opt then
     opt = gsub(opt, "[TAH]", function(mode) colormode = mode; return ""; end)
   end
@@ -691,9 +718,9 @@ local function dumpon(opt, outfile)
 end
 
 -- Public module functions.
-module(...)
-
-on = dumpon
-off = dumpoff
-start = dumpon -- For -j command line option.
+return {
+  on = dumpon,
+  off = dumpoff,
+  start = dumpon -- For -j command line option.
+}
 
