@@ -39,7 +39,7 @@ struct hdr_histogram
  *
  * Due to the size of the histogram being the result of some reasonably
  * involved math on the input parameters this function it is tricky to stack allocate.
- * The histogram is allocated in a single contigious block so can be delete via free,
+ * The histogram is allocated in a single continuous block so can be delete via free,
  * without any structure specific destructor.
  *
  * @param lowest_trackable_value The smallest possible value to be put into the
@@ -72,7 +72,7 @@ int hdr_alloc(int64_t highest_trackable_value, int significant_figures, struct h
 /**
  * Reset a histogram to zero - empty out a histogram and re-initialise it
  *
- * If you want to re-use an existing histogram, but reset everthing back to zero, this
+ * If you want to re-use an existing histogram, but reset everything back to zero, this
  * is the routine to use.
  *
  * @param h The histogram you want to reset to empty.
@@ -90,7 +90,7 @@ size_t hdr_get_memory_size(struct hdr_histogram *h);
 
 /**
  * Records a value in the histogram, will round this value of to a precision at or better
- * than the significant_figure specified at contruction time.
+ * than the significant_figure specified at construction time.
  *
  * @param h "This" pointer
  * @param value Value to add to the histogram
@@ -101,7 +101,7 @@ bool hdr_record_value(struct hdr_histogram* h, int64_t value);
 
 /**
  * Records count values in the histogram, will round this value of to a
- * precision at or better than the significant_figure specified at contruction
+ * precision at or better than the significant_figure specified at construction
  * time.
  *
  * @param h "This" pointer
@@ -116,10 +116,10 @@ bool hdr_record_values(struct hdr_histogram* h, int64_t value, int64_t count);
  * Record a value in the histogram and backfill based on an expected interval.
  *
  * Records a value in the histogram, will round this value of to a precision at or better
- * than the significant_figure specified at contruction time.  This is specifically used
+ * than the significant_figure specified at construction time.  This is specifically used
  * for recording latency.  If the value is larger than the expected_interval then the
  * latency recording system has experienced co-ordinated omission.  This method fill in the
- * values that would of occured had the client providing the load not been blocked.
+ * values that would of occurred had the client providing the load not been blocked.
 
  * @param h "This" pointer
  * @param value Value to add to the histogram
