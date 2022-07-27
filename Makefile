@@ -49,9 +49,9 @@ $(OBJ): config.h Makefile $(LDIR)/libluajit.a | $(ODIR)
 $(ODIR):
 	@mkdir -p $@
 
-$(ODIR)/bytecode.o: src/wrk.lua
+$(ODIR)/bytecode.c: src/wrk.lua
 	@echo LUAJIT $<
-	@$(SHELL) -c 'cd $(LDIR) && ./luajit -b $(CURDIR)/$< $(CURDIR)/$@'
+	@$(SHELL) -c 'cd $(LDIR) && ./luajit -b "$(CURDIR)/$<" "$(CURDIR)/$@"'
 
 $(ODIR)/%.o : %.c
 	@echo CC $<
