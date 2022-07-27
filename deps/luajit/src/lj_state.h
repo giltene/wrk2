@@ -1,6 +1,6 @@
 /*
 ** State and stack handling.
-** Copyright (C) 2005-2014 Mike Pall. See Copyright Notice in luajit.h
+** Copyright (C) 2005-2021 Mike Pall. See Copyright Notice in luajit.h
 */
 
 #ifndef _LJ_STATE_H
@@ -28,8 +28,10 @@ static LJ_AINLINE void lj_state_checkstack(lua_State *L, MSize need)
 
 LJ_FUNC lua_State *lj_state_new(lua_State *L);
 LJ_FUNC void LJ_FASTCALL lj_state_free(global_State *g, lua_State *L);
-#if LJ_64
+#if LJ_64 && !LJ_GC64 && !(defined(LUAJIT_USE_VALGRIND) && defined(LUAJIT_USE_SYSMALLOC))
 LJ_FUNC lua_State *lj_state_newstate(lua_Alloc f, void *ud);
 #endif
+
+#define LJ_ALLOCF_INTERNAL	((lua_Alloc)(void *)(uintptr_t)(1237<<4))
 
 #endif

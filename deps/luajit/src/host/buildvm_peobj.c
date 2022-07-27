@@ -1,6 +1,6 @@
 /*
 ** LuaJIT VM builder: PE object emitter.
-** Copyright (C) 2005-2014 Mike Pall. See Copyright Notice in luajit.h
+** Copyright (C) 2005-2021 Mike Pall. See Copyright Notice in luajit.h
 **
 ** Only used for building on Windows, since we cannot assume the presence
 ** of a suitable assembler. The host and target byte order must match.
@@ -9,7 +9,7 @@
 #include "buildvm.h"
 #include "lj_bc.h"
 
-#if LJ_TARGET_X86ORX64 || LJ_TARGET_PPC
+#if LJ_TARGET_X86ORX64
 
 /* Context for PE object emitter. */
 static char *strtab;
@@ -93,12 +93,6 @@ typedef struct PEsymaux {
 #define PEOBJ_RELOC_ADDR32NB	0x03
 #define PEOBJ_RELOC_OFS		0
 #define PEOBJ_TEXT_FLAGS	0x60500020  /* 60=r+x, 50=align16, 20=code. */
-#elif LJ_TARGET_PPC
-#define PEOBJ_ARCH_TARGET	0x01f2
-#define PEOBJ_RELOC_REL32	0x06
-#define PEOBJ_RELOC_DIR32	0x02
-#define PEOBJ_RELOC_OFS		(-4)
-#define PEOBJ_TEXT_FLAGS	0x60400020  /* 60=r+x, 40=align8, 20=code. */
 #endif
 
 /* Section numbers (0-based). */
@@ -109,6 +103,8 @@ enum {
 #if LJ_TARGET_X64
   PEOBJ_SECT_PDATA,
   PEOBJ_SECT_XDATA,
+#elif LJ_TARGET_X86
+  PEOBJ_SECT_SXDATA,
 #endif
   PEOBJ_SECT_RDATA_Z,
   PEOBJ_NSECTIONS
@@ -208,6 +204,13 @@ void emit_peobj(BuildCtx *ctx)
   sofs += (pesect[PEOBJ_SECT_XDATA].nreloc = 1) * PEOBJ_RELOC_SIZE;
   /* Flags: 40 = read, 30 = align4, 40 = initialized data. */
   pesect[PEOBJ_SECT_XDATA].flags = 0x40300040;
+#elif LJ_TARGET_X86
+  memcpy(pesect[PEOBJ_SECT_SXDATA].name, ".sxdata", sizeof(".sxdata")-1);
+  pesect[PEOBJ_SECT_SXDATA].ofs = sofs;
+  sofs += (pesect[PEOBJ_SECT_SXDATA].size = 4);
+  pesect[PEOBJ_SECT_SXDATA].relocofs = sofs;
+  /* Flags: 40 = read, 30 = align4, 02 = lnk_info, 40 = initialized data. */
+  pesect[PEOBJ_SECT_SXDATA].flags = 0x40300240;
 #endif
 
   memcpy(pesect[PEOBJ_SECT_RDATA_Z].name, ".rdata$Z", sizeof(".rdata$Z")-1);
@@ -232,7 +235,7 @@ void emit_peobj(BuildCtx *ctx)
   nrsym = ctx->nrelocsym;
   pehdr.nsyms = 1+PEOBJ_NSECTIONS*2 + 1+ctx->nsym + nrsym;
 #if LJ_TARGET_X64
-  pehdr.nsyms += 1;  /* Symbol for lj_err_unwind_win64. */
+  pehdr.nsyms += 1;  /* Symbol for lj_err_unwind_win. */
 #endif
 
   /* Write PE object header and all sections. */
@@ -242,15 +245,8 @@ void emit_peobj(BuildCtx *ctx)
   /* Write .text section. */
   host_endian.u = 1;
   if (host_endian.b != LJ_ENDIAN_SELECT(1, 0)) {
-#if LJ_TARGET_PPC
-    uint32_t *p = (uint32_t *)ctx->code;
-    int n = (int)(ctx->codesz >> 2);
-    for (i = 0; i < n; i++, p++)
-      *p = lj_bswap(*p);  /* Byteswap .text section. */
-#else
     fprintf(stderr, "Error: different byte order for host and target\n");
     exit(1);
-#endif
   }
   owrite(ctx, ctx->code, ctx->codesz);
   for (i = 0; i < ctx->nreloc; i++) {
@@ -312,6 +308,19 @@ void emit_peobj(BuildCtx *ctx)
     reloc.type = PEOBJ_RELOC_ADDR32NB;
     owrite(ctx, &reloc, PEOBJ_RELOC_SIZE);
   }
+#elif LJ_TARGET_X86
+  /* Write .sxdata section. */
+  for (i = 0; i < nrsym; i++) {
+    if (!strcmp(ctx->relocsym[i], "_lj_err_unwind_win")) {
+      uint32_t symidx = 1+2+i;
+      owrite(ctx, &symidx, 4);
+      break;
+    }
+  }
+  if (i == nrsym) {
+    fprintf(stderr, "Error: extern lj_err_unwind_win not used\n");
+    exit(1);
+  }
 #endif
 
   /* Write .rdata$Z section. */
@@ -333,8 +342,10 @@ void emit_peobj(BuildCtx *ctx)
 #if LJ_TARGET_X64
     emit_peobj_sym_sect(ctx, pesect, PEOBJ_SECT_PDATA);
     emit_peobj_sym_sect(ctx, pesect, PEOBJ_SECT_XDATA);
-    emit_peobj_sym(ctx, "lj_err_unwind_win64", 0,
+    emit_peobj_sym(ctx, "lj_err_unwind_win", 0,
 		   PEOBJ_SECT_UNDEF, PEOBJ_TYPE_FUNC, PEOBJ_SCL_EXTERN);
+#elif LJ_TARGET_X86
+    emit_peobj_sym_sect(ctx, pesect, PEOBJ_SECT_SXDATA);
 #endif
 
     emit_peobj_sym(ctx, ctx->beginsym, 0,
