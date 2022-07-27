@@ -1,6 +1,6 @@
 /*
 ** C type management.
-** Copyright (C) 2005-2014 Mike Pall. See Copyright Notice in luajit.h
+** Copyright (C) 2005-2021 Mike Pall. See Copyright Notice in luajit.h
 */
 
 #include "lj_obj.h"
@@ -11,8 +11,10 @@
 #include "lj_err.h"
 #include "lj_str.h"
 #include "lj_tab.h"
+#include "lj_strfmt.h"
 #include "lj_ctype.h"
 #include "lj_ccallback.h"
+#include "lj_buf.h"
 
 /* -- C type definitions -------------------------------------------------- */
 
@@ -37,6 +39,8 @@
   _("uint64_t",			UINT64) \
   _("intptr_t",			INT_PSZ) \
   _("uintptr_t",		UINT_PSZ) \
+  /* From POSIX. */ \
+  _("ssize_t",			INT_PSZ) \
   /* End of typedef list. */
 
 /* Keywords (only the ones we actually care for). */
@@ -149,7 +153,7 @@ CTypeID lj_ctype_new(CTState *cts, CType **ctp)
 {
   CTypeID id = cts->top;
   CType *ct;
-  lua_assert(cts->L);
+  lj_assertCTS(cts->L, "uninitialized cts->L");
   if (LJ_UNLIKELY(id >= cts->sizetab)) {
     if (id >= CTID_MAX) lj_err_msg(cts->L, LJ_ERR_TABOV);
 #ifdef LUAJIT_CTYPE_CHECK_ANCHOR
@@ -178,7 +182,7 @@ CTypeID lj_ctype_intern(CTState *cts, CTInfo info, CTSize size)
 {
   uint32_t h = ct_hashtype(info, size);
   CTypeID id = cts->hash[h];
-  lua_assert(cts->L);
+  lj_assertCTS(cts->L, "uninitialized cts->L");
   while (id) {
     CType *ct = ctype_get(cts, id);
     if (ct->info == info && ct->size == size)
@@ -294,9 +298,9 @@ CTSize lj_ctype_vlsize(CTState *cts, CType *ct, CTSize nelem)
     }
     ct = ctype_raw(cts, arrid);
   }
-  lua_assert(ctype_isvlarray(ct->info));  /* Must be a VLA. */
+  lj_assertCTS(ctype_isvlarray(ct->info), "VLA expected");
   ct = ctype_rawchild(cts, ct);  /* Get array element. */
-  lua_assert(ctype_hassize(ct->info));
+  lj_assertCTS(ctype_hassize(ct->info), "bad VLA without size");
   /* Calculate actual size of VLA and check for overflow. */
   xsz += (uint64_t)ct->size * nelem;
   return xsz < 0x80000000u ? (CTSize)xsz : CTSIZE_INVALID;
@@ -319,7 +323,8 @@ CTInfo lj_ctype_info(CTState *cts, CTypeID id, CTSize *szp)
     } else {
       if (!(qual & CTFP_ALIGNED)) qual |= (info & CTF_ALIGN);
       qual |= (info & ~(CTF_ALIGN|CTMASK_CID));
-      lua_assert(ctype_hassize(info) || ctype_isfunc(info));
+      lj_assertCTS(ctype_hassize(info) || ctype_isfunc(info),
+		   "ctype without size");
       *szp = ctype_isfunc(info) ? CTSIZE_INVALID : ct->size;
       break;
     }
@@ -524,7 +529,7 @@ static void ctype_repr(CTRepr *ctr, CTypeID id)
       ctype_appc(ctr, ')');
       break;
     default:
-      lua_assert(0);
+      lj_assertG_(ctr->cts->g, 0, "bad ctype %08x", info);
       break;
     }
     ct = ctype_get(ctr->cts, ctype_cid(info));
@@ -568,19 +573,18 @@ GCstr *lj_ctype_repr_int64(lua_State *L, uint64_t n, int isunsigned)
 /* Convert complex to string with 'i' or 'I' suffix. */
 GCstr *lj_ctype_repr_complex(lua_State *L, void *sp, CTSize size)
 {
-  char buf[2*LJ_STR_NUMBUF+2+1];
+  SBuf *sb = lj_buf_tmp_(L);
   TValue re, im;
-  size_t len;
   if (size == 2*sizeof(double)) {
     re.n = *(double *)sp; im.n = ((double *)sp)[1];
   } else {
     re.n = (double)*(float *)sp; im.n = (double)((float *)sp)[1];
   }
-  len = lj_str_bufnum(buf, &re);
-  if (!(im.u32.hi & 0x80000000u) || im.n != im.n) buf[len++] = '+';
-  len += lj_str_bufnum(buf+len, &im);
-  buf[len] = buf[len-1] >= 'a' ? 'I' : 'i';
-  return lj_str_new(L, buf, len+1);
+  lj_strfmt_putfnum(sb, STRFMT_G14, re.n);
+  if (!(im.u32.hi & 0x80000000u) || im.n != im.n) lj_buf_putchar(sb, '+');
+  lj_strfmt_putfnum(sb, STRFMT_G14, im.n);
+  lj_buf_putchar(sb, sbufP(sb)[-1] >= 'a' ? 'I' : 'i');
+  return lj_buf_str(L, sb);
 }
 
 /* -- C type state -------------------------------------------------------- */

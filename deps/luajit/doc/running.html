@@ -3,8 +3,7 @@
 <head>
 <title>Running LuaJIT</title>
 <meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
-<meta name="Author" content="Mike Pall">
-<meta name="Copyright" content="Copyright (C) 2005-2014, Mike Pall">
+<meta name="Copyright" content="Copyright (C) 2005-2021">
 <meta name="Language" content="en">
 <link rel="stylesheet" type="text/css" href="bluequad.css" media="screen">
 <link rel="stylesheet" type="text/css" href="bluequad-print.css" media="print">
@@ -33,7 +32,7 @@ td.param_default {
 </head>
 <body>
 <div id="site">
-<a href="http://luajit.org"><span>Lua<span id="logo">JIT</span></span></a>
+<a href="https://luajit.org"><span>Lua<span id="logo">JIT</span></span></a>
 </div>
 <div id="head">
 <h1>Running LuaJIT</h1>
@@ -42,7 +41,7 @@ td.param_default {
 <ul><li>
 <a href="luajit.html">LuaJIT</a>
 <ul><li>
-<a href="http://luajit.org/download.html">Download <span class="ext">&raquo;</span></a>
+<a href="https://luajit.org/download.html">Download <span class="ext">&raquo;</span></a>
 </li><li>
 <a href="install.html">Installation</a>
 </li><li>
@@ -63,20 +62,17 @@ td.param_default {
 <a href="ext_jit.html">jit.* Library</a>
 </li><li>
 <a href="ext_c_api.html">Lua/C API</a>
+</li><li>
+<a href="ext_profiler.html">Profiler</a>
 </li></ul>
 </li><li>
 <a href="status.html">Status</a>
-<ul><li>
-<a href="changes.html">Changes</a>
-</li></ul>
 </li><li>
 <a href="faq.html">FAQ</a>
 </li><li>
-<a href="http://luajit.org/performance.html">Performance <span class="ext">&raquo;</span></a>
-</li><li>
 <a href="http://wiki.luajit.org/">Wiki <span class="ext">&raquo;</span></a>
 </li><li>
-<a href="http://luajit.org/list.html">Mailing List <span class="ext">&raquo;</span></a>
+<a href="https://luajit.org/list.html">Mailing List <span class="ext">&raquo;</span></a>
 </li></ul>
 </div>
 <div id="main">
@@ -93,7 +89,7 @@ The <tt>luajit</tt> stand-alone executable is just a slightly modified
 version of the regular <tt>lua</tt> stand-alone executable.
 It supports the same basic options, too. <tt>luajit&nbsp;-h</tt>
 prints a short list of the available options. Please have a look at the
-<a href="http://www.lua.org/manual/5.1/manual.html#6"><span class="ext">&raquo;</span>&nbsp;Lua manual</a>
+<a href="https://www.lua.org/manual/5.1/manual.html#6"><span class="ext">&raquo;</span>&nbsp;Lua manual</a>
 for details.
 </p>
 <p>
@@ -178,6 +174,7 @@ Here are the available LuaJIT control commands:
 <li id="j_flush"><tt>-jflush</tt> &mdash; Flushes the whole cache of compiled code.</li>
 <li id="j_v"><tt>-jv</tt> &mdash; Shows verbose information about the progress of the JIT compiler.</li>
 <li id="j_dump"><tt>-jdump</tt> &mdash; Dumps the code and structures used in various compiler stages.</li>
+<li id="j_p"><tt>-jp</tt> &mdash; Start the <a href="ext_profiler.html">integrated profiler</a>.</li>
 </ul>
 <p>
 The <tt>-jv</tt> and <tt>-jdump</tt> commands are extension modules
@@ -186,7 +183,7 @@ itself. For a description of their options and output format, please
 read the comment block at the start of their source.
 They can be found in the <tt>lib</tt> directory of the source
 distribution or installed under the <tt>jit</tt> directory. By default
-this is <tt>/usr/local/share/luajit-2.0.3/jit</tt> on POSIX
+this is <tt>/usr/local/share/luajit-2.1.0-beta3/jit</tt> on POSIX
 systems.
 </p>
 
@@ -296,7 +293,7 @@ Here are the parameters and their default settings:
 </div>
 <div id="foot">
 <hr class="hide">
-Copyright &copy; 2005-2014 Mike Pall
+Copyright &copy; 2005-2021
 <span class="noprint">
 &middot;
 <a href="contact.html">Contact</a>

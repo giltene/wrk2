@@ -1,6 +1,7 @@
 *.o
 *.a
 wrk
+obj/
 
 deps/luajit/src/host/buildvm
 deps/luajit/src/host/buildvm_arch.h

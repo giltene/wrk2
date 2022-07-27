@@ -1,6 +1,6 @@
 /*
 ** Definitions for target CPU.
-** Copyright (C) 2005-2014 Mike Pall. See Copyright Notice in luajit.h
+** Copyright (C) 2005-2021 Mike Pall. See Copyright Notice in luajit.h
 */
 
 #ifndef _LJ_TARGET_H
@@ -55,7 +55,7 @@ typedef uint32_t RegSP;
 /* Bitset for registers. 32 registers suffice for most architectures.
 ** Note that one set holds bits for both GPRs and FPRs.
 */
-#if LJ_TARGET_PPC || LJ_TARGET_MIPS
+#if LJ_TARGET_PPC || LJ_TARGET_MIPS || LJ_TARGET_ARM64
 typedef uint64_t RegSet;
 #else
 typedef uint32_t RegSet;
@@ -69,7 +69,7 @@ typedef uint32_t RegSet;
 #define rset_set(rs, r)		(rs |= RID2RSET(r))
 #define rset_clear(rs, r)	(rs &= ~RID2RSET(r))
 #define rset_exclude(rs, r)	(rs & ~RID2RSET(r))
-#if LJ_TARGET_PPC || LJ_TARGET_MIPS
+#if LJ_TARGET_PPC || LJ_TARGET_MIPS || LJ_TARGET_ARM64
 #define rset_picktop(rs)	((Reg)(__builtin_clzll(rs)^63))
 #define rset_pickbot(rs)	((Reg)__builtin_ctzll(rs))
 #else
@@ -138,6 +138,8 @@ typedef uint32_t RegCost;
 #include "lj_target_x86.h"
 #elif LJ_TARGET_ARM
 #include "lj_target_arm.h"
+#elif LJ_TARGET_ARM64
+#include "lj_target_arm64.h"
 #elif LJ_TARGET_PPC
 #include "lj_target_ppc.h"
 #elif LJ_TARGET_MIPS
@@ -150,7 +152,8 @@ typedef uint32_t RegCost;
 /* Return the address of an exit stub. */
 static LJ_AINLINE char *exitstub_addr_(char **group, uint32_t exitno)
 {
-  lua_assert(group[exitno / EXITSTUBS_PER_GROUP] != NULL);
+  lj_assertX(group[exitno / EXITSTUBS_PER_GROUP] != NULL,
+	     "exit stub group for exit %d uninitialized", exitno);
   return (char *)group[exitno / EXITSTUBS_PER_GROUP] +
 	 EXITSTUB_SPACING*(exitno % EXITSTUBS_PER_GROUP);
 }

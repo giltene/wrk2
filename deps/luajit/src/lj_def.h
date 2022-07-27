@@ -1,6 +1,6 @@
 /*
 ** LuaJIT common internal definitions.
-** Copyright (C) 2005-2014 Mike Pall. See Copyright Notice in luajit.h
+** Copyright (C) 2005-2021 Mike Pall. See Copyright Notice in luajit.h
 */
 
 #ifndef _LJ_DEF_H
@@ -8,8 +8,8 @@
 
 #include "lua.h"
 
-#if defined(_MSC_VER)
-/* MSVC is stuck in the last century and doesn't have C99's stdint.h. */
+#if defined(_MSC_VER) && (_MSC_VER < 1700)
+/* Old MSVC is stuck in the last century and doesn't have C99's stdint.h. */
 typedef __int8 int8_t;
 typedef __int16 int16_t;
 typedef __int32 int32_t;
@@ -46,10 +46,14 @@ typedef unsigned int uintptr_t;
 #include <stdlib.h>
 
 /* Various VM limits. */
-#define LJ_MAX_MEM	0x7fffff00	/* Max. total memory allocation. */
+#define LJ_MAX_MEM32	0x7fffff00	/* Max. 32 bit memory allocation. */
+#define LJ_MAX_MEM64	((uint64_t)1<<47)  /* Max. 64 bit memory allocation. */
+/* Max. total memory allocation. */
+#define LJ_MAX_MEM	(LJ_GC64 ? LJ_MAX_MEM64 : LJ_MAX_MEM32)
 #define LJ_MAX_ALLOC	LJ_MAX_MEM	/* Max. individual allocation length. */
-#define LJ_MAX_STR	LJ_MAX_MEM	/* Max. string length. */
-#define LJ_MAX_UDATA	LJ_MAX_MEM	/* Max. userdata length. */
+#define LJ_MAX_STR	LJ_MAX_MEM32	/* Max. string length. */
+#define LJ_MAX_BUF	LJ_MAX_MEM32	/* Max. buffer length. */
+#define LJ_MAX_UDATA	LJ_MAX_MEM32	/* Max. userdata length. */
 
 #define LJ_MAX_STRTAB	(1<<26)		/* Max. string table size. */
 #define LJ_MAX_HBITS	26		/* Max. hash bits. */
@@ -57,7 +61,7 @@ typedef unsigned int uintptr_t;
 #define LJ_MAX_ASIZE	((1<<(LJ_MAX_ABITS-1))+1)  /* Max. array part size. */
 #define LJ_MAX_COLOSIZE	16		/* Max. elems for colocated array. */
 
-#define LJ_MAX_LINE	LJ_MAX_MEM	/* Max. source code line number. */
+#define LJ_MAX_LINE	LJ_MAX_MEM32	/* Max. source code line number. */
 #define LJ_MAX_XLEVEL	200		/* Max. syntactic nesting level. */
 #define LJ_MAX_BCINS	(1<<26)		/* Max. # of bytecode instructions. */
 #define LJ_MAX_SLOTS	250		/* Max. # of slots in a Lua func. */
@@ -65,7 +69,7 @@ typedef unsigned int uintptr_t;
 #define LJ_MAX_UPVAL	60		/* Max. # of upvalues. */
 
 #define LJ_MAX_IDXCHAIN	100		/* __index/__newindex chain limit. */
-#define LJ_STACK_EXTRA	5		/* Extra stack space (metamethods). */
+#define LJ_STACK_EXTRA	(5+2*LJ_FR2)	/* Extra stack space (metamethods). */
 
 #define LJ_NUM_CBPAGE	1		/* Number of FFI callback pages. */
 
@@ -76,7 +80,6 @@ typedef unsigned int uintptr_t;
 #define LJ_MIN_SBUF	32		/* Min. string buffer length. */
 #define LJ_MIN_VECSZ	8		/* Min. size for growable vectors. */
 #define LJ_MIN_IRSZ	32		/* Min. size for growable IR. */
-#define LJ_MIN_K64SZ	16		/* Min. size for chained K64Array. */
 
 /* JIT compiler limits. */
 #define LJ_MAX_JSLOTS	250		/* Max. # of stack slots for a trace. */
@@ -91,6 +94,9 @@ typedef unsigned int uintptr_t;
 #define U64x(hi, lo)	(((uint64_t)0x##hi << 32) + (uint64_t)0x##lo)
 #define i32ptr(p)	((int32_t)(intptr_t)(void *)(p))
 #define u32ptr(p)	((uint32_t)(intptr_t)(void *)(p))
+#define i64ptr(p)	((int64_t)(intptr_t)(void *)(p))
+#define u64ptr(p)	((uint64_t)(intptr_t)(void *)(p))
+#define igcptr(p)	(LJ_GC64 ? i64ptr(p) : i32ptr(p))
 
 #define checki8(x)	((x) == (int32_t)(int8_t)(x))
 #define checku8(x)	((x) == (int32_t)(uint8_t)(x))
@@ -98,7 +104,10 @@ typedef unsigned int uintptr_t;
 #define checku16(x)	((x) == (int32_t)(uint16_t)(x))
 #define checki32(x)	((x) == (int32_t)(x))
 #define checku32(x)	((x) == (uint32_t)(x))
+#define checkptr31(x)	(((uint64_t)(uintptr_t)(x) >> 31) == 0)
 #define checkptr32(x)	((uintptr_t)(x) == (uint32_t)(uintptr_t)(x))
+#define checkptr47(x)	(((uint64_t)(uintptr_t)(x) >> 47) == 0)
+#define checkptrGC(x)	(LJ_GC64 ? checkptr47((x)) : LJ_64 ? checkptr31((x)) :1)
 
 /* Every half-decent C compiler transforms this into a rotate instruction. */
 #define lj_rol(x, n)	(((x)<<(n)) | ((x)>>(-(int)(n)&(8*sizeof(x)-1))))
@@ -111,7 +120,7 @@ typedef uintptr_t BloomFilter;
 #define bloomset(b, x)	((b) |= bloombit((x)))
 #define bloomtest(b, x)	((b) & bloombit((x)))
 
-#if defined(__GNUC__)
+#if defined(__GNUC__) || defined(__clang__) || defined(__psp2__)
 
 #define LJ_NORET	__attribute__((noreturn))
 #define LJ_ALIGN(n)	__attribute__((aligned(n)))
@@ -119,7 +128,7 @@ typedef uintptr_t BloomFilter;
 #define LJ_AINLINE	inline __attribute__((always_inline))
 #define LJ_NOINLINE	__attribute__((noinline))
 
-#if defined(__ELF__) || defined(__MACH__)
+#if defined(__ELF__) || defined(__MACH__) || defined(__psp2__)
 #if !((defined(__sun__) && defined(__svr4__)) || defined(__CELLOS_LV2__))
 #define LJ_NOAPI	extern __attribute__((visibility("hidden")))
 #endif
@@ -150,6 +159,9 @@ static LJ_AINLINE uint32_t lj_fls(uint32_t x)
 #if defined(__arm__)
 static LJ_AINLINE uint32_t lj_bswap(uint32_t x)
 {
+#if defined(__psp2__)
+  return __builtin_rev(x);
+#else
   uint32_t r;
 #if __ARM_ARCH_6__ || __ARM_ARCH_6J__ || __ARM_ARCH_6T2__ || __ARM_ARCH_6Z__ ||\
     __ARM_ARCH_6ZK__ || __ARM_ARCH_7__ || __ARM_ARCH_7A__ || __ARM_ARCH_7R__
@@ -163,13 +175,14 @@ static LJ_AINLINE uint32_t lj_bswap(uint32_t x)
 #endif
   return ((r & 0xff00ffffu) >> 8) ^ lj_ror(x, 8);
 #endif
+#endif
 }
 
 static LJ_AINLINE uint64_t lj_bswap64(uint64_t x)
 {
   return ((uint64_t)lj_bswap((uint32_t)x)<<32) | lj_bswap((uint32_t)(x>>32));
 }
-#elif (__GNUC__ > 4) || (__GNUC__ == 4 && __GNUC_MINOR__ >= 3)
+#elif (__GNUC__ > 4) || (__GNUC__ == 4 && __GNUC_MINOR__ >= 3) || __clang__
 static LJ_AINLINE uint32_t lj_bswap(uint32_t x)
 {
   return (uint32_t)__builtin_bswap32((int32_t)x);
@@ -250,19 +263,19 @@ static LJ_AINLINE uint32_t lj_fls(uint32_t x)
   return _CountLeadingZeros(x) ^ 31;
 }
 #else
-unsigned char _BitScanForward(uint32_t *, unsigned long);
-unsigned char _BitScanReverse(uint32_t *, unsigned long);
+unsigned char _BitScanForward(unsigned long *, unsigned long);
+unsigned char _BitScanReverse(unsigned long *, unsigned long);
 #pragma intrinsic(_BitScanForward)
 #pragma intrinsic(_BitScanReverse)
 
 static LJ_AINLINE uint32_t lj_ffs(uint32_t x)
 {
-  uint32_t r; _BitScanForward(&r, x); return r;
+  unsigned long r; _BitScanForward(&r, x); return (uint32_t)r;
 }
 
 static LJ_AINLINE uint32_t lj_fls(uint32_t x)
 {
-  uint32_t r; _BitScanReverse(&r, x); return r;
+  unsigned long r; _BitScanReverse(&r, x); return (uint32_t)r;
 }
 #endif
 
@@ -325,14 +338,28 @@ static LJ_AINLINE uint32_t lj_getu32(const void *v)
 #define LJ_FUNCA_NORET	LJ_FUNCA LJ_NORET
 #define LJ_ASMF_NORET	LJ_ASMF LJ_NORET
 
-/* Runtime assertions. */
-#ifdef lua_assert
-#define check_exp(c, e)		(lua_assert(c), (e))
-#define api_check(l, e)		lua_assert(e)
+/* Internal assertions. */
+#if defined(LUA_USE_ASSERT) || defined(LUA_USE_APICHECK)
+#define lj_assert_check(g, c, ...) \
+  ((c) ? (void)0 : \
+   (lj_assert_fail((g), __FILE__, __LINE__, __func__, __VA_ARGS__), 0))
+#define lj_checkapi(c, ...)	lj_assert_check(G(L), (c), __VA_ARGS__)
 #else
-#define lua_assert(c)		((void)0)
+#define lj_checkapi(c, ...)	((void)L)
+#endif
+
+#ifdef LUA_USE_ASSERT
+#define lj_assertG_(g, c, ...)	lj_assert_check((g), (c), __VA_ARGS__)
+#define lj_assertG(c, ...)	lj_assert_check(g, (c), __VA_ARGS__)
+#define lj_assertL(c, ...)	lj_assert_check(G(L), (c), __VA_ARGS__)
+#define lj_assertX(c, ...)	lj_assert_check(NULL, (c), __VA_ARGS__)
+#define check_exp(c, e)		(lj_assertX((c), #c), (e))
+#else
+#define lj_assertG_(g, c, ...)	((void)0)
+#define lj_assertG(c, ...)	((void)g)
+#define lj_assertL(c, ...)	((void)L)
+#define lj_assertX(c, ...)	((void)0)
 #define check_exp(c, e)		(e)
-#define api_check		luai_apicheck
 #endif
 
 /* Static assertions. */
@@ -345,5 +372,10 @@ static LJ_AINLINE uint32_t lj_getu32(const void *v)
 #define LJ_STATIC_ASSERT(cond) \
   extern void LJ_ASSERT_NAME(__LINE__)(int STATIC_ASSERTION_FAILED[(cond)?1:-1])
 #endif
+
+/* PRNG state. Need this here, details in lj_prng.h. */
+typedef struct PRNGState {
+  uint64_t u[4];
+} PRNGState;
 
 #endif

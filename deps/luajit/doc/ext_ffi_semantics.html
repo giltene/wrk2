@@ -3,8 +3,7 @@
 <head>
 <title>FFI Semantics</title>
 <meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
-<meta name="Author" content="Mike Pall">
-<meta name="Copyright" content="Copyright (C) 2005-2014, Mike Pall">
+<meta name="Copyright" content="Copyright (C) 2005-2021">
 <meta name="Language" content="en">
 <link rel="stylesheet" type="text/css" href="bluequad.css" media="screen">
 <link rel="stylesheet" type="text/css" href="bluequad-print.css" media="print">
@@ -16,7 +15,7 @@ td.convop { font-style: italic; width: 40%; }
 </head>
 <body>
 <div id="site">
-<a href="http://luajit.org"><span>Lua<span id="logo">JIT</span></span></a>
+<a href="https://luajit.org"><span>Lua<span id="logo">JIT</span></span></a>
 </div>
 <div id="head">
 <h1>FFI Semantics</h1>
@@ -25,7 +24,7 @@ td.convop { font-style: italic; width: 40%; }
 <ul><li>
 <a href="luajit.html">LuaJIT</a>
 <ul><li>
-<a href="http://luajit.org/download.html">Download <span class="ext">&raquo;</span></a>
+<a href="https://luajit.org/download.html">Download <span class="ext">&raquo;</span></a>
 </li><li>
 <a href="install.html">Installation</a>
 </li><li>
@@ -46,20 +45,17 @@ td.convop { font-style: italic; width: 40%; }
 <a href="ext_jit.html">jit.* Library</a>
 </li><li>
 <a href="ext_c_api.html">Lua/C API</a>
+</li><li>
+<a href="ext_profiler.html">Profiler</a>
 </li></ul>
 </li><li>
 <a href="status.html">Status</a>
-<ul><li>
-<a href="changes.html">Changes</a>
-</li></ul>
 </li><li>
 <a href="faq.html">FAQ</a>
 </li><li>
-<a href="http://luajit.org/performance.html">Performance <span class="ext">&raquo;</span></a>
-</li><li>
 <a href="http://wiki.luajit.org/">Wiki <span class="ext">&raquo;</span></a>
 </li><li>
-<a href="http://luajit.org/list.html">Mailing List <span class="ext">&raquo;</span></a>
+<a href="https://luajit.org/list.html">Mailing List <span class="ext">&raquo;</span></a>
 </li></ul>
 </div>
 <div id="main">
@@ -182,6 +178,8 @@ a <tt>typedef</tt>, except re-declarations will be ignored):
 <tt>int32_t</tt>, <tt>int64_t</tt>, <tt>uint8_t</tt>,
 <tt>uint16_t</tt>, <tt>uint32_t</tt>, <tt>uint64_t</tt>,
 <tt>intptr_t</tt>, <tt>uintptr_t</tt>.</li>
+
+<li>From <tt>&lt;unistd.h&gt;</tt> (POSIX): <tt>ssize_t</tt>.</li>
 
 </ul>
 <p>
@@ -674,7 +672,7 @@ through unions is explicitly detected and allowed.
 <a href="ext_ffi_api.html#ffi_new">constructor</a>. This is equivalent
 to <tt>ffi.new(ct, ...)</tt>, unless a <tt>__new</tt> metamethod is
 defined. The <tt>__new</tt> metamethod is called with the ctype object
-plus any other arguments passed to the contructor. Note that you have to
+plus any other arguments passed to the constructor. Note that you have to
 use <tt>ffi.new</tt> inside of it, since calling <tt>ct(...)</tt> would
 cause infinite recursion.</li>
 
@@ -729,6 +727,22 @@ operators return <tt>2LL&nbsp;^&nbsp;63</tt> or
 You'll have to explicitly convert a 64&nbsp;bit integer to a Lua
 number (e.g. for regular floating-point calculations) with
 <tt>tonumber()</tt>. But note this may incur a precision loss.</li>
+
+<li><b>64&nbsp;bit bitwise operations</b>: the rules for 64&nbsp;bit
+arithmetic operators apply analogously.<br>
+
+Unlike the other <tt>bit.*</tt> operations, <tt>bit.tobit()</tt>
+converts a cdata number via <tt>int64_t</tt> to <tt>int32_t</tt> and
+returns a Lua number.<br>
+
+For <tt>bit.band()</tt>, <tt>bit.bor()</tt> and <tt>bit.bxor()</tt>, the
+conversion to <tt>int64_t</tt> or <tt>uint64_t</tt> applies to
+<em>all</em> arguments, if <em>any</em> argument is a cdata number.<br>
+
+For all other operations, only the first argument is used to determine
+the output type. This implies that a cdata number as a shift count for
+shifts and rotates is accepted, but that alone does <em>not</em> cause
+a cdata number output.
 
 </ul>
 
@@ -844,7 +858,7 @@ place of a type, you'd need to use <tt>ffi.typeof("int")</tt> instead.
 <p>
 The main use for parameterized types are libraries implementing abstract
 data types
-(<a href="http://www.freelists.org/post/luajit/ffi-type-of-pointer-to,8"><span class="ext">&raquo;</span>&nbsp;example</a>),
+(<a href="https://www.freelists.org/post/luajit/ffi-type-of-pointer-to,8"><span class="ext">&raquo;</span>&nbsp;example</a>),
 similar to what can be achieved with C++ template metaprogramming.
 Another use case are derived types of anonymous structs, which avoids
 pollution of the global struct namespace.
@@ -1201,14 +1215,12 @@ The following operations are currently not compiled and may exhibit
 suboptimal performance, especially when used in inner loops:
 </p>
 <ul>
-<li>Bitfield accesses and initializations.</li>
 <li>Vector operations.</li>
 <li>Table initializers.</li>
 <li>Initialization of nested <tt>struct</tt>/<tt>union</tt> types.</li>
-<li>Allocations of variable-length arrays or structs.</li>
-<li>Allocations of C&nbsp;types with a size &gt; 128&nbsp;bytes or an
-alignment &gt; 8&nbsp;bytes.</li>
-<li>Conversions from lightuserdata to <tt>void&nbsp;*</tt>.</li>
+<li>Non-default initialization of VLA/VLS or large C&nbsp;types
+(&gt; 128&nbsp;bytes or &gt; 16 array elements).</li>
+<li>Bitfield initializations.</li>
 <li>Pointer differences for element sizes that are not a power of
 two.</li>
 <li>Calls to C&nbsp;functions with aggregates passed or returned by
@@ -1224,7 +1236,6 @@ value.</li>
 Other missing features:
 </p>
 <ul>
-<li>Bit operations for 64&nbsp;bit types.</li>
 <li>Arithmetic for <tt>complex</tt> numbers.</li>
 <li>Passing structs by value to vararg C&nbsp;functions.</li>
 <li><a href="extensions.html#exceptions">C++ exception interoperability</a>
@@ -1235,7 +1246,7 @@ compiled.</li>
 </div>
 <div id="foot">
 <hr class="hide">
-Copyright &copy; 2005-2014 Mike Pall
+Copyright &copy; 2005-2021
 <span class="noprint">
 &middot;
 <a href="contact.html">Contact</a>

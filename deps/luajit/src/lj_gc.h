@@ -1,6 +1,6 @@
 /*
 ** Garbage collector.
-** Copyright (C) 2005-2014 Mike Pall. See Copyright Notice in luajit.h
+** Copyright (C) 2005-2021 Mike Pall. See Copyright Notice in luajit.h
 */
 
 #ifndef _LJ_GC_H
@@ -81,8 +81,10 @@ LJ_FUNC void lj_gc_barriertrace(global_State *g, uint32_t traceno);
 static LJ_AINLINE void lj_gc_barrierback(global_State *g, GCtab *t)
 {
   GCobj *o = obj2gco(t);
-  lua_assert(isblack(o) && !isdead(g, o));
-  lua_assert(g->gc.state != GCSfinalize && g->gc.state != GCSpause);
+  lj_assertG(isblack(o) && !isdead(g, o),
+	     "bad object states for backward barrier");
+  lj_assertG(g->gc.state != GCSfinalize && g->gc.state != GCSpause,
+	     "bad GC state");
   black2gray(o);
   setgcrefr(t->gclist, g->gc.grayagain);
   setgcref(g->gc.grayagain, o);
@@ -107,8 +109,8 @@ static LJ_AINLINE void lj_gc_barrierback(global_State *g, GCtab *t)
       lj_gc_barrierf(G(L), obj2gco(p), obj2gco(o)); }
 
 /* Allocator. */
-LJ_FUNC void *lj_mem_realloc(lua_State *L, void *p, MSize osz, MSize nsz);
-LJ_FUNC void * LJ_FASTCALL lj_mem_newgco(lua_State *L, MSize size);
+LJ_FUNC void *lj_mem_realloc(lua_State *L, void *p, GCSize osz, GCSize nsz);
+LJ_FUNC void * LJ_FASTCALL lj_mem_newgco(lua_State *L, GCSize size);
 LJ_FUNC void *lj_mem_grow(lua_State *L, void *p,
 			  MSize *szp, MSize lim, MSize esz);
 
@@ -116,13 +118,13 @@ LJ_FUNC void *lj_mem_grow(lua_State *L, void *p,
 
 static LJ_AINLINE void lj_mem_free(global_State *g, void *p, size_t osize)
 {
-  g->gc.total -= (MSize)osize;
+  g->gc.total -= (GCSize)osize;
   g->allocf(g->allocd, p, osize, 0);
 }
 
-#define lj_mem_newvec(L, n, t)	((t *)lj_mem_new(L, (MSize)((n)*sizeof(t))))
+#define lj_mem_newvec(L, n, t)	((t *)lj_mem_new(L, (GCSize)((n)*sizeof(t))))
 #define lj_mem_reallocvec(L, p, on, n, t) \
-  ((p) = (t *)lj_mem_realloc(L, p, (on)*sizeof(t), (MSize)((n)*sizeof(t))))
+  ((p) = (t *)lj_mem_realloc(L, p, (on)*sizeof(t), (GCSize)((n)*sizeof(t))))
 #define lj_mem_growvec(L, p, n, m, t) \
   ((p) = (t *)lj_mem_grow(L, (p), &(n), (m), (MSize)sizeof(t)))
 #define lj_mem_freevec(g, p, n, t)	lj_mem_free(g, (p), (n)*sizeof(t))

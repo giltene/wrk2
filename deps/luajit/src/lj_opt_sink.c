@@ -1,6 +1,6 @@
 /*
 ** SINK: Allocation Sinking and Store Sinking.
-** Copyright (C) 2005-2014 Mike Pall. See Copyright Notice in luajit.h
+** Copyright (C) 2005-2021 Mike Pall. See Copyright Notice in luajit.h
 */
 
 #define lj_opt_sink_c
@@ -78,8 +78,7 @@ static void sink_mark_ins(jit_State *J)
     switch (ir->o) {
     case IR_BASE:
       return;  /* Finished. */
-    case IR_CALLL:  /* IRCALL_lj_tab_len */
-    case IR_ALOAD: case IR_HLOAD: case IR_XLOAD: case IR_TBAR:
+    case IR_ALOAD: case IR_HLOAD: case IR_XLOAD: case IR_TBAR: case IR_ALEN:
       irt_setmark(IR(ir->op1)->t);  /* Mark ref for remaining loads. */
       break;
     case IR_FLOAD:
@@ -100,8 +99,8 @@ static void sink_mark_ins(jit_State *J)
 	   (LJ_32 && ir+1 < irlast && (ir+1)->o == IR_HIOP &&
 	    !sink_checkphi(J, ir, (ir+1)->op2))))
 	irt_setmark(ir->t);  /* Mark ineligible allocation. */
-      /* fallthrough */
 #endif
+      /* fallthrough */
     case IR_USTORE:
       irt_setmark(IR(ir->op2)->t);  /* Mark stored value. */
       break;
@@ -153,10 +152,9 @@ static void sink_remark_phi(jit_State *J)
     remark = 0;
     for (ir = IR(J->cur.nins-1); ir->o == IR_PHI; ir--) {
       IRIns *irl = IR(ir->op1), *irr = IR(ir->op2);
-      if (((irl->t.irt ^ irr->t.irt) & IRT_MARK))
-	remark = 1;
-      else if (irl->prev == irr->prev)
+      if (!((irl->t.irt ^ irr->t.irt) & IRT_MARK) && irl->prev == irr->prev)
 	continue;
+      remark |= (~(irl->t.irt & irr->t.irt) & IRT_MARK);
       irt_setmark(IR(ir->op1)->t);
       irt_setmark(IR(ir->op2)->t);
     }
@@ -166,8 +164,8 @@ static void sink_remark_phi(jit_State *J)
 /* Sweep instructions and tag sunken allocations and stores. */
 static void sink_sweep_ins(jit_State *J)
 {
-  IRIns *ir, *irfirst = IR(J->cur.nk);
-  for (ir = IR(J->cur.nins-1) ; ir >= irfirst; ir--) {
+  IRIns *ir, *irbase = IR(REF_BASE);
+  for (ir = IR(J->cur.nins-1) ; ir >= irbase; ir--) {
     switch (ir->o) {
     case IR_ASTORE: case IR_HSTORE: case IR_FSTORE: case IR_XSTORE: {
       IRIns *ira = sink_checkalloc(J, ir);
@@ -216,6 +214,13 @@ static void sink_sweep_ins(jit_State *J)
       ir->prev = REGSP_INIT;
       break;
     }
+  }
+  for (ir = IR(J->cur.nk); ir < irbase; ir++) {
+    irt_clearmark(ir->t);
+    ir->prev = REGSP_INIT;
+    /* The false-positive of irt_is64() for ASMREF_L (REF_NIL) is OK here. */
+    if (irt_is64(ir->t) && ir->o != IR_KNULL)
+      ir++;
   }
 }
 
