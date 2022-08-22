@@ -67,7 +67,7 @@ static void usage() {
            "    -v, --version          Print version details      \n"
            "    -R, --rate        <T>  work rate (throughput)     \n"
            "                           in requests/sec (total)    \n"
-           "                           [Required Parameter]       \n"
+           "                           [UINT64_MAX by default]    \n"
            "                                                      \n"
            "                                                      \n"
            "  Numeric arguments may include a SI unit (1k, 1M, 1G)\n"
@@ -160,8 +160,14 @@ int main(int argc, char **argv) {
 
     char *time = format_time_s(cfg.duration);
     printf("Running %s test @ %s\n", time, url);
-    printf("  %"PRIu64" threads and %"PRIu64" connections\n",
-            cfg.threads, cfg.connections);
+    if (cfg.rate == UINT64_MAX) {
+        printf("  %"PRIu64" threads and %"PRIu64" connections\n",
+                cfg.threads, cfg.connections);
+    } else {
+        printf("  %"PRIu64" threads and %"PRIu64" connections "
+                "with desired rate %"PRIu64"\n",
+                cfg.threads, cfg.connections, cfg.rate);
+    }
 
     uint64_t start    = time_us();
     uint64_t complete = 0;
@@ -776,11 +782,8 @@ static int parse_args(struct config *cfg, char **url, struct http_parser_url *pa
         return -1;
     }
 
-    if (cfg->rate == 0) {
-        fprintf(stderr,
-                "Throughput MUST be specified with the --rate or -R option\n");
-        return -1;
-    }
+    if (cfg->rate == 0)
+        cfg->rate = UINT64_MAX;
 
     *url    = argv[optind];
     *header = NULL;
