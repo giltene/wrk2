@@ -4,9 +4,12 @@
 #include <stdio.h>
 #include <strings.h>
 #include <inttypes.h>
+#include <errno.h>
+#include <string.h>
 
 #include "units.h"
 #include "aprintf.h"
+#include "zmalloc.h"
 
 typedef struct {
     int scale;
@@ -101,4 +104,41 @@ int scan_metric(char *s, uint64_t *n) {
 
 int scan_time(char *s, uint64_t *n) {
     return scan_units(s, n, &time_units_s);
+}
+
+int scan_affinity(char *s,  struct aff_set_head **as_head) {
+    char *str = strdup(s);
+    char *token = NULL;
+    char *saveptr;
+    struct aff_set_head *head = NULL;
+
+    token = strtok_r(str, ",", &saveptr);
+    if (token != NULL) {
+        do {
+            int val;
+            struct aff_set *item = NULL;
+
+            errno = 0;
+            val = (int)strtol(token, NULL, 0);
+            if (errno != 0) {
+                free(str);
+                return -1;
+            }
+
+            item = zcalloc(sizeof(struct aff_set));
+            CPU_ZERO(&item->set);
+            CPU_SET(val, &item->set);
+            if (head == NULL) {
+                head = zmalloc(sizeof(struct aff_set_head));
+                STAILQ_INIT(head);
+            }
+            STAILQ_INSERT_TAIL(head, item, items);
+
+            token = strtok_r(NULL, ",", &saveptr);
+        } while (token != NULL);
+    }
+
+    free(str);
+    *as_head = head;
+    return 0;
 }

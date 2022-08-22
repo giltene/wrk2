@@ -5,12 +5,15 @@
 #include "main.h"
 #include "hdr_histogram.h"
 #include "stats.h"
+#include "units.h"
+#include <assert.h>
 
 // Max recordable latency of 1 day
 #define MAX_LATENCY 24L * 60 * 60 * 1000000
 
 static struct config {
     uint64_t threads;
+    struct aff_set_head *affinity;
     uint64_t connections;
     uint64_t duration;
     uint64_t timeout;
@@ -55,6 +58,8 @@ static void usage() {
            "    -c, --connections <N>  Connections to keep open   \n"
            "    -d, --duration    <T>  Duration of test           \n"
            "    -t, --threads     <N>  Number of threads to use   \n"
+           "    -a, --affinity    <S>  Threads affinity: comma    \n"
+           "                           separated list of CPUs     \n"
            "                                                      \n"
            "    -s, --script      <S>  Load Lua script file       \n"
            "    -H, --header      <H>  Add header to request      \n"
@@ -123,6 +128,10 @@ int main(int argc, char **argv) {
     uint64_t connections = cfg.connections / cfg.threads;
     double throughput    = (double)cfg.rate / cfg.threads;
     uint64_t stop_at     = time_us() + (cfg.duration * 1000000);
+    struct aff_set_head *as_head = cfg.affinity;
+    struct aff_set      *as_item;
+    if (as_head != NULL)
+       as_item = STAILQ_FIRST(as_head);
 
     for (uint64_t i = 0; i < cfg.threads; i++) {
         thread *t = &threads[i];
@@ -130,6 +139,12 @@ int main(int argc, char **argv) {
         t->connections = connections;
         t->throughput = throughput;
         t->stop_at     = stop_at;
+        t->cpu_set = NULL;
+        if (as_head != NULL) {
+            assert(as_item != NULL);
+            t->cpu_set = &as_item->set;
+            as_item = STAILQ_NEXT(as_item, items);
+        }
 
         t->L = script_create(cfg.script, url, headers);
         script_init(L, t, argc - optind, &argv[optind]);
@@ -250,6 +265,17 @@ int main(int argc, char **argv) {
 void *thread_main(void *arg) {
     thread *thread = arg;
     aeEventLoop *loop = thread->loop;
+
+    if (thread->cpu_set != NULL) {
+        int res;
+        cpu_set_t *set = thread->cpu_set;
+
+        res = pthread_setaffinity_np(pthread_self(), sizeof(*set), set);
+        if (res != 0) {
+            fprintf(stderr, "set thread affinity failed (errno: %d)\n", res);
+            exit(EXIT_FAILURE);
+        }
+    }
 
     thread->cs = zcalloc(thread->connections * sizeof(connection));
     tinymt64_init(&thread->rand, time_us());
@@ -695,6 +721,7 @@ static struct option longopts[] = {
     { "connections",    required_argument, NULL, 'c' },
     { "duration",       required_argument, NULL, 'd' },
     { "threads",        required_argument, NULL, 't' },
+    { "affinity",       required_argument, NULL, 'a' },
     { "script",         required_argument, NULL, 's' },
     { "header",         required_argument, NULL, 'H' },
     { "latency",        no_argument,       NULL, 'L' },
@@ -712,16 +739,20 @@ static int parse_args(struct config *cfg, char **url, struct http_parser_url *pa
 
     memset(cfg, 0, sizeof(struct config));
     cfg->threads     = 2;
+    cfg->affinity    = NULL;
     cfg->connections = 10;
     cfg->duration    = 10;
     cfg->timeout     = SOCKET_TIMEOUT_MS;
     cfg->rate        = 0;
     cfg->record_all_responses = true;
 
-    while ((c = getopt_long(argc, argv, "t:c:d:s:H:T:R:LUBrv?", longopts, NULL)) != -1) {
+    while ((c = getopt_long(argc, argv, "t:a:c:d:s:H:T:R:LUBrv?", longopts, NULL)) != -1) {
         switch (c) {
             case 't':
                 if (scan_metric(optarg, &cfg->threads)) return -1;
+                break;
+            case 'a':
+                if (scan_affinity(optarg, &cfg->affinity)) return -1;
                 break;
             case 'c':
                 if (scan_metric(optarg, &cfg->connections)) return -1;
@@ -780,6 +811,20 @@ static int parse_args(struct config *cfg, char **url, struct http_parser_url *pa
         fprintf(stderr,
                 "Throughput MUST be specified with the --rate or -R option\n");
         return -1;
+    }
+
+    if (cfg->affinity != NULL) {
+        uint64_t i = 0;
+        struct aff_set *set;
+
+        STAILQ_FOREACH(set, cfg->affinity, items)
+            i++;
+
+        if (cfg->threads != i) {
+            fprintf(stderr, "number of affinity CPUs (%lu) does not match the "
+                    "number of threads (%lu)\n", i, cfg->threads);
+            return -1;
+        }
     }
 
     *url    = argv[optind];
