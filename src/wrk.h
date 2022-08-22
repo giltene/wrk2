@@ -30,6 +30,7 @@ typedef struct {
     aeEventLoop *loop;
     struct addrinfo *addr;
     uint64_t connections;
+    cpu_set_t *cpu_set;
     int interval;
     uint64_t stop_at;
     uint64_t complete;
