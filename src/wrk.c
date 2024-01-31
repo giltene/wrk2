@@ -522,8 +522,8 @@ static int response_complete(http_parser *parser) {
 
     if (expected_latency_timing < 0) {
         printf("\n\n ---------- \n\n");
-        printf("We are about to crash and die (recoridng a negative #)");
-        printf("This wil never ever ever happen...");
+        printf("We are about to crash and die (recording a negative number)");
+        printf("This will never ever happen...");
         printf("But when it does. The following information will help in debugging");
         printf("response_complete:\n");
         printf("  expected_latency_timing = %lld\n", expected_latency_timing);
