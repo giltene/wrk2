@@ -726,3 +726,46 @@ Example 2: [1.4 second ^Z artifact introduced on the httpd server]:
     Transfer/sec:    676.57KB
 
 [CO example]:https://raw.github.com/giltene/wrk2/master/CoordinatedOmission/wrk2_CleanVsCO.png "Coordinated Omission example"
+
+# Build with Docker
+Create a `Dockerfile`
+```
+# Use a CentOS base image as required by the yum commands
+FROM centos:7
+
+# Set the environment variable for non-interactive operations
+ENV DEBIAN_FRONTEND=noninteractive
+
+# --- FIX FOR CENTOS 7 REPOSITORY ISSUE (BASEURL ERROR) ---
+# CentOS 7 repositories have been moved to the vault, causing 'Cannot find a valid baseurl' errors.
+# This command updates the configuration files to point to the vault URL by commenting out mirrorlist
+# and uncommenting/updating the baseurl to point to vault.centos.org.
+RUN sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-* && \
+    sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-*
+
+# 1. Update system and install required tools
+RUN yum -y update && \
+    yum -y groupinstall 'Development Tools' && \
+    yum -y install openssl-devel git zlib-devel && \
+    yum clean all
+
+# 2. Clone the wrk2 repository
+WORKDIR /usr/src/wrk2
+RUN git clone https://github.com/giltene/wrk2.git .
+
+# 3. Build the executable
+RUN make
+
+# The compiled 'wrk' executable is now located at /usr/src/wrk2/wrk inside the container.
+
+# Define the entry point for running the container
+ENTRYPOINT ["/usr/src/wrk2/wrk"]
+CMD ["--help"]
+```
+
+```bash
+docker build -t wrk2-builder .
+docker create --name wrk_temp wrk2-builder
+docker cp wrk_temp:/usr/src/wrk2/wrk ./wrk2
+./wrk2 --version
+```
