@@ -1,10 +1,9 @@
-<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+<!DOCTYPE html>
 <html>
 <head>
 <title>FFI Semantics</title>
-<meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
-<meta name="Author" content="Mike Pall">
-<meta name="Copyright" content="Copyright (C) 2005-2014, Mike Pall">
+<meta charset="utf-8">
+<meta name="Copyright" content="Copyright (C) 2005-2025">
 <meta name="Language" content="en">
 <link rel="stylesheet" type="text/css" href="bluequad.css" media="screen">
 <link rel="stylesheet" type="text/css" href="bluequad-print.css" media="print">
@@ -16,7 +15,7 @@ td.convop { font-style: italic; width: 40%; }
 </head>
 <body>
 <div id="site">
-<a href="http://luajit.org"><span>Lua<span id="logo">JIT</span></span></a>
+<a href="https://luajit.org"><span>Lua<span id="logo">JIT</span></span></a>
 </div>
 <div id="head">
 <h1>FFI Semantics</h1>
@@ -25,7 +24,7 @@ td.convop { font-style: italic; width: 40%; }
 <ul><li>
 <a href="luajit.html">LuaJIT</a>
 <ul><li>
-<a href="http://luajit.org/download.html">Download <span class="ext">&raquo;</span></a>
+<a href="https://luajit.org/download.html">Download <span class="ext">&raquo;</span></a>
 </li><li>
 <a href="install.html">Installation</a>
 </li><li>
@@ -43,23 +42,20 @@ td.convop { font-style: italic; width: 40%; }
 <a class="current" href="ext_ffi_semantics.html">FFI Semantics</a>
 </li></ul>
 </li><li>
+<a href="ext_buffer.html">String Buffers</a>
+</li><li>
 <a href="ext_jit.html">jit.* Library</a>
 </li><li>
 <a href="ext_c_api.html">Lua/C API</a>
+</li><li>
+<a href="ext_profiler.html">Profiler</a>
 </li></ul>
 </li><li>
-<a href="status.html">Status</a>
-<ul><li>
-<a href="changes.html">Changes</a>
-</li></ul>
+<a href="https://luajit.org/status.html">Status <span class="ext">&raquo;</span></a>
 </li><li>
-<a href="faq.html">FAQ</a>
+<a href="https://luajit.org/faq.html">FAQ <span class="ext">&raquo;</span></a>
 </li><li>
-<a href="http://luajit.org/performance.html">Performance <span class="ext">&raquo;</span></a>
-</li><li>
-<a href="http://wiki.luajit.org/">Wiki <span class="ext">&raquo;</span></a>
-</li><li>
-<a href="http://luajit.org/list.html">Mailing List <span class="ext">&raquo;</span></a>
+<a href="https://luajit.org/list.html">Mailing List <span class="ext">&raquo;</span></a>
 </li></ul>
 </div>
 <div id="main">
@@ -90,7 +86,7 @@ footprint. It's used by the <a href="ext_ffi_api.html">ffi.* library
 functions</a> to declare C&nbsp;types or external symbols.
 </p>
 <p>
-It's only purpose is to parse C&nbsp;declarations, as found e.g. in
+Its only purpose is to parse C&nbsp;declarations, as found e.g. in
 C&nbsp;header files. Although it does evaluate constant expressions,
 it's <em>not</em> a C&nbsp;compiler. The body of <tt>inline</tt>
 C&nbsp;function definitions is simply ignored.
@@ -167,7 +163,7 @@ function declarations.</li>
 
 </ul>
 <p>
-The following C&nbsp;types are pre-defined by the C&nbsp;parser (like
+The following C&nbsp;types are predefined by the C&nbsp;parser (like
 a <tt>typedef</tt>, except re-declarations will be ignored):
 </p>
 <ul>
@@ -182,6 +178,8 @@ a <tt>typedef</tt>, except re-declarations will be ignored):
 <tt>int32_t</tt>, <tt>int64_t</tt>, <tt>uint8_t</tt>,
 <tt>uint16_t</tt>, <tt>uint32_t</tt>, <tt>uint64_t</tt>,
 <tt>intptr_t</tt>, <tt>uintptr_t</tt>.</li>
+
+<li>From <tt>&lt;unistd.h&gt;</tt> (POSIX): <tt>ssize_t</tt>.</li>
 
 </ul>
 <p>
@@ -340,42 +338,44 @@ pointer or type compatibility:
 <tr class="odd">
 <td class="convin">Integer</td><td class="convop">&rarr;<sup>round</sup></td><td class="convout"><tt>double</tt>, <tt>float</tt></td></tr>
 <tr class="even">
-<td class="convin"><tt>double</tt>, <tt>float</tt></td><td class="convop">&rarr;<sup>trunc</sup> <tt>int32_t</tt> &rarr;<sup>narrow</sup></td><td class="convout"><tt>(u)int8_t</tt>, <tt>(u)int16_t</tt></td></tr>
+<td class="convin"><tt>double</tt>, <tt>float</tt></td><td class="convop">&rarr;<sup>trunc</sup> <tt>int64_t</tt> &rarr;<sup>narrow</sup> <sup>*</sup></td><td class="convout"><tt>(u)int8_t</tt>, <tt>(u)int16_t</tt>, <tt>(u)int32_t</tt></td></tr>
 <tr class="odd">
-<td class="convin"><tt>double</tt>, <tt>float</tt></td><td class="convop">&rarr;<sup>trunc</sup></td><td class="convout"><tt>(u)int32_t</tt>, <tt>(u)int64_t</tt></td></tr>
+<td class="convin"><tt>double</tt>, <tt>float</tt></td><td class="convop">&rarr;<sup>trunc</sup></td><td class="convout"><tt>int64_t</tt></td></tr>
 <tr class="even">
+<td class="convin"><tt>double</tt>, <tt>float</tt></td><td class="convop">&rarr;<sup>trunc</sup> uint64_t &cup; int64_t &rarr;<sup>reinterpret</sup> <sup>*</sup></td><td class="convout"><tt>uint64_t</tt></td></tr>
+<tr class="odd">
 <td class="convin"><tt>double</tt>, <tt>float</tt></td><td class="convop">&rarr;<sup>round</sup></td><td class="convout"><tt>float</tt>, <tt>double</tt></td></tr>
-<tr class="odd separate">
+<tr class="even separate">
 <td class="convin">Number</td><td class="convop">n == 0 &rarr; 0, otherwise 1</td><td class="convout"><tt>bool</tt></td></tr>
-<tr class="even">
+<tr class="odd">
 <td class="convin"><tt>bool</tt></td><td class="convop"><tt>false</tt> &rarr; 0, <tt>true</tt> &rarr; 1</td><td class="convout">Number</td></tr>
-<tr class="odd separate">
+<tr class="even separate">
 <td class="convin">Complex number</td><td class="convop">convert real part</td><td class="convout">Number</td></tr>
-<tr class="even">
+<tr class="odd">
 <td class="convin">Number</td><td class="convop">convert real part, imag = 0</td><td class="convout">Complex number</td></tr>
-<tr class="odd">
+<tr class="even">
 <td class="convin">Complex number</td><td class="convop">convert real and imag part</td><td class="convout">Complex number</td></tr>
-<tr class="even separate">
+<tr class="odd separate">
 <td class="convin">Number</td><td class="convop">convert scalar and replicate</td><td class="convout">Vector</td></tr>
-<tr class="odd">
+<tr class="even">
 <td class="convin">Vector</td><td class="convop">copy (same size)</td><td class="convout">Vector</td></tr>
-<tr class="even separate">
+<tr class="odd separate">
 <td class="convin"><tt>struct</tt>/<tt>union</tt></td><td class="convop">take base address (compat)</td><td class="convout">Pointer</td></tr>
-<tr class="odd">
+<tr class="even">
 <td class="convin">Array</td><td class="convop">take base address (compat)</td><td class="convout">Pointer</td></tr>
-<tr class="even">
-<td class="convin">Function</td><td class="convop">take function address</td><td class="convout">Function pointer</td></tr>
-<tr class="odd separate">
-<td class="convin">Number</td><td class="convop">convert via <tt>uintptr_t</tt> (cast)</td><td class="convout">Pointer</td></tr>
-<tr class="even">
-<td class="convin">Pointer</td><td class="convop">convert address (compat/cast)</td><td class="convout">Pointer</td></tr>
 <tr class="odd">
+<td class="convin">Function</td><td class="convop">take function address</td><td class="convout">Function pointer</td></tr>
+<tr class="even separate">
+<td class="convin">Number</td><td class="convop">convert via <tt>uintptr_t</tt> (cast)</td><td class="convout">Pointer</td></tr>
+<tr class="odd">
+<td class="convin">Pointer</td><td class="convop">convert address (compat/cast)</td><td class="convout">Pointer</td></tr>
+<tr class="even">
 <td class="convin">Pointer</td><td class="convop">convert address (cast)</td><td class="convout">Integer</td></tr>
-<tr class="even">
+<tr class="odd">
 <td class="convin">Array</td><td class="convop">convert base address (cast)</td><td class="convout">Integer</td></tr>
-<tr class="odd separate">
+<tr class="even separate">
 <td class="convin">Array</td><td class="convop">copy (compat)</td><td class="convout">Array</td></tr>
-<tr class="even">
+<tr class="odd">
 <td class="convin"><tt>struct</tt>/<tt>union</tt></td><td class="convop">copy (identical type)</td><td class="convout"><tt>struct</tt>/<tt>union</tt></td></tr>
 </table>
 <p>
@@ -385,6 +385,24 @@ type.
 <p>
 Conversions not listed above will raise an error. E.g. it's not
 possible to convert a pointer to a complex number or vice versa.
+</p>
+<p>
+* Some conversions from <tt>double</tt> have a larger defined range to
+allow for mixed-signedness conversions, which are common in C code.
+E.g. initializing an <tt>int32_t</tt> field with <tt>0xffffffff</tt>
+or initializing an <tt>uint32_t</tt> or <tt>uint64_t</tt> field with
+<tt>-1</tt>. Under strict conversion rules, these assignments would
+give undefined results, since Lua numbers are doubles. The extended
+ranges make these conversions defined. Lua numbers that are even
+outside that range give an architecture-specific result.
+</p>
+<p>
+Please note that doubles do not have the precision to represent the
+whole signed or unsigned 64 bit integer range. Beware of large hex
+constants in particular: e.g. <tt>0xffffffffffffffff</tt> is a double
+rounded up to <tt>0x1p64</tt> during parsing. This will <em>not</em>
+convert to a defined 64 bit integer value. Use the 64 bit literal
+syntax instead, i.e. <tt>0xffffffffffffffffULL</tt>.
 </p>
 
 <h3 id="convert_vararg">Conversions for vararg C&nbsp;function arguments</h3>
@@ -441,6 +459,19 @@ ffi.C.printf("integer value: %d\n", ffi.new("int", x))
 If you don't do this, the default Lua number &rarr; <tt>double</tt>
 conversion rule applies. A vararg C&nbsp;function expecting an integer
 will see a garbled or uninitialized value.
+</p>
+<p>
+Note: this is the only place where creating a boxed scalar number type is
+actually useful. <b>Never use <tt>ffi.new("int")</tt>, <tt>ffi.new("float")</tt>
+etc. anywhere else!</b>
+</p>
+<p style="font-size: 8pt;">
+Ditto for <tt>ffi.cast()</tt>. Explicitly boxing scalars <b>does not</b>
+improve performance or force <tt>int</tt> or <tt>float</tt> arithmetic! It
+just adds costly boxing, unboxing and conversions steps. And it may lead
+to surprise results, because
+<a href="#cdata_arith">cdata arithmetic on scalar numbers</a>
+is always performed on 64 bit integers.
 </p>
 
 <h2 id="init">Initializers</h2>
@@ -583,9 +614,9 @@ ffi.new("struct nested", {x=1,y={2,3}}) --> x = 1, y.a = 2, y.b = 3
 
 <h2 id="cdata_ops">Operations on cdata Objects</h2>
 <p>
-All of the standard Lua operators can be applied to cdata objects or a
+All standard Lua operators can be applied to cdata objects or a
 mix of a cdata object and another Lua object. The following list shows
-the pre-defined operations.
+the predefined operations.
 </p>
 <p>
 Reference types are dereferenced <em>before</em> performing each of
@@ -593,7 +624,7 @@ the operations below &mdash; the operation is applied to the
 C&nbsp;type pointed to by the reference.
 </p>
 <p>
-The pre-defined operations are always tried first before deferring to a
+The predefined operations are always tried first before deferring to a
 metamethod or index table (if any) for the corresponding ctype (except
 for <tt>__new</tt>). An error is raised if the metamethod lookup or
 index table lookup fails.
@@ -643,7 +674,7 @@ assigning to an index of a vector raises an error.</li>
 </ul>
 <p>
 A ctype object can be indexed with a string key, too. The only
-pre-defined operation is reading scoped constants of
+predefined operation is reading scoped constants of
 <tt>struct</tt>/<tt>union</tt> types. All other accesses defer
 to the corresponding metamethods or index tables (if any).
 </p>
@@ -656,7 +687,7 @@ certain optimizations.
 <p>
 As a consequence, the <em>elements</em> of complex numbers and
 vectors are immutable. But the elements of an aggregate holding these
-types <em>may</em> be modified of course. I.e. you cannot assign to
+types <em>may</em> be modified, of course. I.e. you cannot assign to
 <tt>foo.c.im</tt>, but you can assign a (newly created) complex number
 to <tt>foo.c</tt>.
 </p>
@@ -674,9 +705,9 @@ through unions is explicitly detected and allowed.
 <a href="ext_ffi_api.html#ffi_new">constructor</a>. This is equivalent
 to <tt>ffi.new(ct, ...)</tt>, unless a <tt>__new</tt> metamethod is
 defined. The <tt>__new</tt> metamethod is called with the ctype object
-plus any other arguments passed to the contructor. Note that you have to
-use <tt>ffi.new</tt> inside of it, since calling <tt>ct(...)</tt> would
-cause infinite recursion.</li>
+plus any other arguments passed to the constructor. Note that you have to
+use <tt>ffi.new</tt> inside the metamethod, since calling <tt>ct(...)</tt>
+would cause infinite recursion.</li>
 
 <li><b>C&nbsp;function call</b>: a cdata function or cdata function
 pointer can be called. The passed arguments are
@@ -687,7 +718,7 @@ variable argument part of vararg C&nbsp;function use
 C&nbsp;function is called and the return value (if any) is
 <a href="#convert_tolua">converted to a Lua object</a>.<br>
 On Windows/x86 systems, <tt>__stdcall</tt> functions are automatically
-detected and a function declared as <tt>__cdecl</tt> (the default) is
+detected, and a function declared as <tt>__cdecl</tt> (the default) is
 silently fixed up after the first call.</li>
 
 </ul>
@@ -697,7 +728,7 @@ silently fixed up after the first call.</li>
 
 <li><b>Pointer arithmetic</b>: a cdata pointer/array and a cdata
 number or a Lua number can be added or subtracted. The number must be
-on the right hand side for a subtraction. The result is a pointer of
+on the right-hand side for a subtraction. The result is a pointer of
 the same type with an address plus or minus the number value
 multiplied by the element size in bytes. An error is raised if the
 element size is undefined.</li>
@@ -712,7 +743,7 @@ operators (<tt>+&nbsp;-&nbsp;*&nbsp;/&nbsp;%&nbsp;^</tt> and unary
 minus) can be applied to two cdata numbers, or a cdata number and a
 Lua number. If one of them is an <tt>uint64_t</tt>, the other side is
 converted to an <tt>uint64_t</tt> and an unsigned arithmetic operation
-is performed. Otherwise both sides are converted to an
+is performed. Otherwise, both sides are converted to an
 <tt>int64_t</tt> and a signed arithmetic operation is performed. The
 result is a boxed 64&nbsp;bit cdata object.<br>
 
@@ -730,6 +761,22 @@ You'll have to explicitly convert a 64&nbsp;bit integer to a Lua
 number (e.g. for regular floating-point calculations) with
 <tt>tonumber()</tt>. But note this may incur a precision loss.</li>
 
+<li><b>64&nbsp;bit bitwise operations</b>: the rules for 64&nbsp;bit
+arithmetic operators apply analogously.<br>
+
+Unlike the other <tt>bit.*</tt> operations, <tt>bit.tobit()</tt>
+converts a cdata number via <tt>int64_t</tt> to <tt>int32_t</tt> and
+returns a Lua number.<br>
+
+For <tt>bit.band()</tt>, <tt>bit.bor()</tt> and <tt>bit.bxor()</tt>, the
+conversion to <tt>int64_t</tt> or <tt>uint64_t</tt> applies to
+<em>all</em> arguments, if <em>any</em> argument is a cdata number.<br>
+
+For all other operations, only the first argument is used to determine
+the output type. This implies that a cdata number as a shift count for
+shifts and rotates is accepted, but that alone does <em>not</em> cause
+a cdata number output.
+
 </ul>
 
 <h3 id="cdata_comp">Comparisons of cdata objects</h3>
@@ -743,7 +790,7 @@ which is compatible with any other pointer type.</li>
 <li><b>64&nbsp;bit integer comparison</b>: two cdata numbers, or a
 cdata number and a Lua number can be compared with each other. If one
 of them is an <tt>uint64_t</tt>, the other side is converted to an
-<tt>uint64_t</tt> and an unsigned comparison is performed. Otherwise
+<tt>uint64_t</tt> and an unsigned comparison is performed. Otherwise,
 both sides are converted to an <tt>int64_t</tt> and a signed
 comparison is performed.<br>
 
@@ -768,9 +815,9 @@ keys!</b>
 A cdata object is treated like any other garbage-collected object and
 is hashed and compared by its address for table indexing. Since
 there's no interning for cdata value types, the same value may be
-boxed in different cdata objects with different addresses. Thus
+boxed in different cdata objects with different addresses. Thus,
 <tt>t[1LL+1LL]</tt> and <tt>t[2LL]</tt> usually <b>do not</b> point to
-the same hash slot and they certainly <b>do not</b> point to the same
+the same hash slot, and they certainly <b>do not</b> point to the same
 hash slot as <tt>t[2]</tt>.
 </p>
 <p>
@@ -792,7 +839,7 @@ the resulting Lua number as a key when indexing tables.<br>
 One obvious benefit: <tt>t[tonumber(2LL)]</tt> <b>does</b> point to
 the same slot as <tt>t[2]</tt>.</li>
 
-<li>Otherwise use either <tt>tostring()</tt> on 64&nbsp;bit integers
+<li>Otherwise, use either <tt>tostring()</tt> on 64&nbsp;bit integers
 or complex numbers or combine multiple fields of a cdata aggregate to
 a Lua string (e.g. with
 <a href="ext_ffi_api.html#ffi_string"><tt>ffi.string()</tt></a>). Then
@@ -800,7 +847,7 @@ use the resulting Lua string as a key when indexing tables.</li>
 
 <li>Create your own specialized hash table implementation using the
 C&nbsp;types provided by the FFI library, just like you would in
-C&nbsp;code. Ultimately this may give much better performance than the
+C&nbsp;code. Ultimately, this may give much better performance than the
 other alternatives or what a generic by-value hash table could
 possibly provide.</li>
 
@@ -844,7 +891,7 @@ place of a type, you'd need to use <tt>ffi.typeof("int")</tt> instead.
 <p>
 The main use for parameterized types are libraries implementing abstract
 data types
-(<a href="http://www.freelists.org/post/luajit/ffi-type-of-pointer-to,8"><span class="ext">&raquo;</span>&nbsp;example</a>),
+(<a href="https://www.freelists.org/post/luajit/ffi-type-of-pointer-to,8"><span class="ext">&raquo;</span>&nbsp;example</a>),
 similar to what can be achieved with C++ template metaprogramming.
 Another use case are derived types of anonymous structs, which avoids
 pollution of the global struct namespace.
@@ -866,7 +913,7 @@ garbage collector will automatically free the memory used by it (at
 the end of the next GC cycle).
 </p>
 <p>
-Please note that pointers themselves are cdata objects, however they
+Please note, that pointers themselves are cdata objects, however they
 are <b>not</b> followed by the garbage collector. So e.g. if you
 assign a cdata array to a pointer, you must keep the cdata object
 holding the array alive as long as the pointer is still in use:
@@ -915,18 +962,18 @@ of the function pointer and the Lua function object (closure).
 </p>
 <p>
 This can happen implicitly due to the usual conversions, e.g. when
-passing a Lua function to a function pointer argument. Or you can use
+passing a Lua function to a function pointer argument. Or, you can use
 <tt>ffi.cast()</tt> to explicitly cast a Lua function to a
 C&nbsp;function pointer.
 </p>
 <p>
-Currently only certain C&nbsp;function types can be used as callback
+Currently, only certain C&nbsp;function types can be used as callback
 functions. Neither C&nbsp;vararg functions nor functions with
 pass-by-value aggregate argument or result types are supported. There
-are no restrictions for the kind of Lua functions that can be called
+are no restrictions on the kind of Lua functions that can be called
 from the callback &mdash; no checks for the proper number of arguments
 are made. The return value of the Lua function will be converted to the
-result type and an error will be thrown for invalid conversions.
+result type, and an error will be thrown for invalid conversions.
 </p>
 <p>
 It's allowed to throw errors across a callback invocation, but it's not
@@ -987,7 +1034,7 @@ convention cannot be automatically detected, unlike for
 <tt>__stdcall</tt> calls <em>to</em> Windows functions.
 </p>
 <p>
-For some use cases it's necessary to free up the resources or to
+For some use cases, it's necessary to free up the resources or to
 dynamically redirect callbacks. Use an explicit cast to a
 C&nbsp;function pointer and keep the resulting cdata object. Then use
 the <a href="ext_ffi_api.html#callback_free"><tt>cb:free()</tt></a>
@@ -1040,7 +1087,7 @@ GUI application, which waits for user input most of the time, anyway.
 </p>
 <p>
 For new designs <b>avoid push-style APIs</b>: a C&nbsp;function repeatedly
-calling a callback for each result. Instead <b>use pull-style APIs</b>:
+calling a callback for each result. Instead, <b>use pull-style APIs</b>:
 call a C&nbsp;function repeatedly to get a new result. Calls from Lua
 to C via the FFI are much faster than the other way round. Most well-designed
 libraries already use pull-style APIs (read/write, get/put).
@@ -1059,7 +1106,7 @@ function.
 </p>
 <p>
 Indexing a C&nbsp;library namespace object with a symbol name (a Lua
-string) automatically binds it to the library. First the symbol type
+string) automatically binds it to the library. First, the symbol type
 is resolved &mdash; it must have been declared with
 <a href="ext_ffi_api.html#ffi_cdef"><tt>ffi.cdef</tt></a>. Then the
 symbol address is resolved by searching for the symbol name in the
@@ -1114,7 +1161,7 @@ Performance notice: the JIT compiler specializes to the identity of
 namespace objects and to the strings used to index it. This
 effectively turns function cdata objects into constants. It's not
 useful and actually counter-productive to explicitly cache these
-function objects, e.g. <tt>local strlen = ffi.C.strlen</tt>. OTOH it
+function objects, e.g. <tt>local strlen = ffi.C.strlen</tt>. OTOH, it
 <em>is</em> useful to cache the namespace itself, e.g. <tt>local C =
 ffi.C</tt>.
 </p>
@@ -1139,14 +1186,14 @@ This behavior is inevitable, since the goal is to provide full
 interoperability with C&nbsp;code. Adding extra safety measures, like
 bounds checks, would be futile. There's no way to detect
 misdeclarations of C&nbsp;functions, since shared libraries only
-provide symbol names, but no type information. Likewise there's no way
+provide symbol names, but no type information. Likewise, there's no way
 to infer the valid range of indexes for a returned pointer.
 </p>
 <p>
 Again: the FFI library is a low-level library. This implies it needs
 to be used with care, but it's flexibility and performance often
 outweigh this concern. If you're a C or C++ developer, it'll be easy
-to apply your existing knowledge. OTOH writing code for the FFI
+to apply your existing knowledge. OTOH, writing code for the FFI
 library is not for the faint of heart and probably shouldn't be the
 first exercise for someone with little experience in Lua, C or C++.
 </p>
@@ -1174,7 +1221,7 @@ currently incomplete:
 <li>C&nbsp;declarations are not passed through a C&nbsp;pre-processor,
 yet.</li>
 <li>The C&nbsp;parser is able to evaluate most constant expressions
-commonly found in C&nbsp;header files. However it doesn't handle the
+commonly found in C&nbsp;header files. However, it doesn't handle the
 full range of C&nbsp;expression semantics and may fail for some
 obscure constructs.</li>
 <li><tt>static const</tt> declarations only work for integer types
@@ -1201,14 +1248,12 @@ The following operations are currently not compiled and may exhibit
 suboptimal performance, especially when used in inner loops:
 </p>
 <ul>
-<li>Bitfield accesses and initializations.</li>
 <li>Vector operations.</li>
 <li>Table initializers.</li>
 <li>Initialization of nested <tt>struct</tt>/<tt>union</tt> types.</li>
-<li>Allocations of variable-length arrays or structs.</li>
-<li>Allocations of C&nbsp;types with a size &gt; 128&nbsp;bytes or an
-alignment &gt; 8&nbsp;bytes.</li>
-<li>Conversions from lightuserdata to <tt>void&nbsp;*</tt>.</li>
+<li>Non-default initialization of VLA/VLS or large C&nbsp;types
+(&gt; 128&nbsp;bytes or &gt; 16 array elements).</li>
+<li>Bitfield initializations.</li>
 <li>Pointer differences for element sizes that are not a power of
 two.</li>
 <li>Calls to C&nbsp;functions with aggregates passed or returned by
@@ -1224,7 +1269,6 @@ value.</li>
 Other missing features:
 </p>
 <ul>
-<li>Bit operations for 64&nbsp;bit types.</li>
 <li>Arithmetic for <tt>complex</tt> numbers.</li>
 <li>Passing structs by value to vararg C&nbsp;functions.</li>
 <li><a href="extensions.html#exceptions">C++ exception interoperability</a>
@@ -1235,7 +1279,7 @@ compiled.</li>
 </div>
 <div id="foot">
 <hr class="hide">
-Copyright &copy; 2005-2014 Mike Pall
+Copyright &copy; 2005-2025
 <span class="noprint">
 &middot;
 <a href="contact.html">Contact</a>

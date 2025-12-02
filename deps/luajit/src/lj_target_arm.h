@@ -1,6 +1,6 @@
 /*
 ** Definitions for ARM CPUs.
-** Copyright (C) 2005-2014 Mike Pall. See Copyright Notice in luajit.h
+** Copyright (C) 2005-2025 Mike Pall. See Copyright Notice in luajit.h
 */
 
 #ifndef _LJ_TARGET_ARM_H
@@ -190,6 +190,7 @@ typedef enum ARMIns {
   ARMI_LDRSB = 0xe01000d0,
   ARMI_LDRSH = 0xe01000f0,
   ARMI_LDRD = 0xe00000d0,
+  ARMI_LDRL = 0xe51f0000,
   ARMI_STR = 0xe4000000,
   ARMI_STRB = 0xe4400000,
   ARMI_STRH = 0xe00000b0,
@@ -200,6 +201,7 @@ typedef enum ARMIns {
   ARMI_BL = 0xeb000000,
   ARMI_BLX = 0xfa000000,
   ARMI_BLXr = 0xe12fff30,
+  ARMI_BX = 0xe12fff10,
 
   /* ARMv6 */
   ARMI_REV = 0xe6bf0f30,
@@ -211,6 +213,7 @@ typedef enum ARMIns {
   /* ARMv6T2 */
   ARMI_MOVW = 0xe3000000,
   ARMI_MOVT = 0xe3400000,
+  ARMI_BFI = 0xe7c00010,
 
   /* VFP */
   ARMI_VMOV_D = 0xeeb00b40,
@@ -243,10 +246,6 @@ typedef enum ARMIns {
   ARMI_VCVT_S32_F64 = 0xeebd0bc0,
   ARMI_VCVT_U32_F32 = 0xeebc0ac0,
   ARMI_VCVT_U32_F64 = 0xeebc0bc0,
-  ARMI_VCVTR_S32_F32 = 0xeebd0a40,
-  ARMI_VCVTR_S32_F64 = 0xeebd0b40,
-  ARMI_VCVTR_U32_F32 = 0xeebc0a40,
-  ARMI_VCVTR_U32_F64 = 0xeebc0b40,
   ARMI_VCVT_F32_S32 = 0xeeb80ac0,
   ARMI_VCVT_F64_S32 = 0xeeb80bc0,
   ARMI_VCVT_F32_U32 = 0xeeb80a40,

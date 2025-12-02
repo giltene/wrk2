@@ -1,6 +1,6 @@
 /*
 ** VM event handling.
-** Copyright (C) 2005-2014 Mike Pall. See Copyright Notice in luajit.h
+** Copyright (C) 2005-2025 Mike Pall. See Copyright Notice in luajit.h
 */
 
 #ifndef _LJ_VMEVENT_H
@@ -24,30 +24,33 @@
 /* VM event IDs. */
 typedef enum {
   VMEVENT_DEF(BC,	0x00003883),
-  VMEVENT_DEF(TRACE,	0xb2d91467),
-  VMEVENT_DEF(RECORD,	0x9284bf4f),
-  VMEVENT_DEF(TEXIT,	0xb29df2b0),
+  VMEVENT_DEF(TRACE,	0x12d91467),
+  VMEVENT_DEF(RECORD,	0x1284bf4f),
+  VMEVENT_DEF(TEXIT,	0x129df2b0),
+  VMEVENT_DEF(ERRFIN,	0x12d93888),
   LJ_VMEVENT__MAX
 } VMEvent;
 
 #ifdef LUAJIT_DISABLE_VMEVENT
-#define lj_vmevent_send(L, ev, args)		UNUSED(L)
-#define lj_vmevent_send_(L, ev, args, post)	UNUSED(L)
+#define lj_vmevent_send(g, ev, args)		UNUSED(g)
+#define lj_vmevent_send_(g, ev, args, post)	UNUSED(g)
 #else
-#define lj_vmevent_send(L, ev, args) \
-  if (G(L)->vmevmask & VMEVENT_MASK(LJ_VMEVENT_##ev)) { \
-    ptrdiff_t argbase = lj_vmevent_prepare(L, LJ_VMEVENT_##ev); \
+#define lj_vmevent_send(g, ev, args) \
+  if ((g)->vmevmask & VMEVENT_MASK(LJ_VMEVENT_##ev)) { \
+    lua_State *V = vmthread(g); \
+    ptrdiff_t argbase = lj_vmevent_prepare(V, LJ_VMEVENT_##ev); \
     if (argbase) { \
       args \
-      lj_vmevent_call(L, argbase); \
+      lj_vmevent_call(V, argbase); \
     } \
   }
-#define lj_vmevent_send_(L, ev, args, post) \
-  if (G(L)->vmevmask & VMEVENT_MASK(LJ_VMEVENT_##ev)) { \
-    ptrdiff_t argbase = lj_vmevent_prepare(L, LJ_VMEVENT_##ev); \
+#define lj_vmevent_send_(g, ev, args, post) \
+  if ((g)->vmevmask & VMEVENT_MASK(LJ_VMEVENT_##ev)) { \
+    lua_State *V = vmthread(g); \
+    ptrdiff_t argbase = lj_vmevent_prepare(V, LJ_VMEVENT_##ev); \
     if (argbase) { \
       args \
-      lj_vmevent_call(L, argbase); \
+      lj_vmevent_call(V, argbase); \
       post \
     } \
   }

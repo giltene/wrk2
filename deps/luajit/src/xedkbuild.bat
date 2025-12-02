@@ -14,7 +14,7 @@
 @set LJMT=mt /nologo
 @set DASMDIR=..\dynasm
 @set DASM=%DASMDIR%\dynasm.lua
-@set ALL_LIB=lib_base.c lib_math.c lib_bit.c lib_string.c lib_table.c lib_io.c lib_os.c lib_package.c lib_debug.c lib_jit.c lib_ffi.c
+@set ALL_LIB=lib_base.c lib_math.c lib_bit.c lib_string.c lib_table.c lib_io.c lib_os.c lib_package.c lib_debug.c lib_jit.c lib_ffi.c lib_buffer.c
 
 %LJCOMPILE% host\minilua.c
 @if errorlevel 1 goto :BAD
@@ -30,6 +30,9 @@ if exist minilua.exe.manifest^
 @set DASMFLAGS=-D GPR64 -D FRAME32 -D PPE -D SQRT -D DUALNUM
 minilua %DASM% -LN %DASMFLAGS% -o host\buildvm_arch.h vm_ppc.dasc
 @if errorlevel 1 goto :BAD
+
+if exist ..\.git ( git show -s --format=%%ct >luajit_relver.txt ) else ( type ..\.relver >luajit_relver.txt )
+minilua host\genversion.lua
 
 %LJCOMPILE% /I "." /I %DASMDIR% /D_XBOX_VER=200 /DLUAJIT_TARGET=LUAJIT_ARCH_PPC  host\buildvm*.c
 @if errorlevel 1 goto :BAD

@@ -1,17 +1,16 @@
-<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+<!DOCTYPE html>
 <html>
 <head>
 <title>jit.* Library</title>
-<meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
-<meta name="Author" content="Mike Pall">
-<meta name="Copyright" content="Copyright (C) 2005-2014, Mike Pall">
+<meta charset="utf-8">
+<meta name="Copyright" content="Copyright (C) 2005-2025">
 <meta name="Language" content="en">
 <link rel="stylesheet" type="text/css" href="bluequad.css" media="screen">
 <link rel="stylesheet" type="text/css" href="bluequad-print.css" media="print">
 </head>
 <body>
 <div id="site">
-<a href="http://luajit.org"><span>Lua<span id="logo">JIT</span></span></a>
+<a href="https://luajit.org"><span>Lua<span id="logo">JIT</span></span></a>
 </div>
 <div id="head">
 <h1><tt>jit.*</tt> Library</h1>
@@ -20,7 +19,7 @@
 <ul><li>
 <a href="luajit.html">LuaJIT</a>
 <ul><li>
-<a href="http://luajit.org/download.html">Download <span class="ext">&raquo;</span></a>
+<a href="https://luajit.org/download.html">Download <span class="ext">&raquo;</span></a>
 </li><li>
 <a href="install.html">Installation</a>
 </li><li>
@@ -38,23 +37,20 @@
 <a href="ext_ffi_semantics.html">FFI Semantics</a>
 </li></ul>
 </li><li>
+<a href="ext_buffer.html">String Buffers</a>
+</li><li>
 <a class="current" href="ext_jit.html">jit.* Library</a>
 </li><li>
 <a href="ext_c_api.html">Lua/C API</a>
+</li><li>
+<a href="ext_profiler.html">Profiler</a>
 </li></ul>
 </li><li>
-<a href="status.html">Status</a>
-<ul><li>
-<a href="changes.html">Changes</a>
-</li></ul>
+<a href="https://luajit.org/status.html">Status <span class="ext">&raquo;</span></a>
 </li><li>
-<a href="faq.html">FAQ</a>
+<a href="https://luajit.org/faq.html">FAQ <span class="ext">&raquo;</span></a>
 </li><li>
-<a href="http://luajit.org/performance.html">Performance <span class="ext">&raquo;</span></a>
-</li><li>
-<a href="http://wiki.luajit.org/">Wiki <span class="ext">&raquo;</span></a>
-</li><li>
-<a href="http://luajit.org/list.html">Mailing List <span class="ext">&raquo;</span></a>
+<a href="https://luajit.org/list.html">Mailing List <span class="ext">&raquo;</span></a>
 </li></ul>
 </div>
 <div id="main">
@@ -139,7 +135,9 @@ Contains the LuaJIT version string.
 <h3 id="jit_version_num"><tt>jit.version_num</tt></h3>
 <p>
 Contains the version number of the LuaJIT core. Version xx.yy.zz
-is represented by the decimal number xxyyzz.
+is represented by the decimal number xxyyzz.<br>
+<b>DEPRECATED after the switch to
+<a href="https://luajit.org/status.html#release"><span class="ext">&raquo;</span>&nbsp;rolling releases</a>. zz is frozen at 99.</b>
 </p>
 
 <h3 id="jit_os"><tt>jit.os</tt></h3>
@@ -151,12 +149,12 @@ Contains the target OS name:
 <h3 id="jit_arch"><tt>jit.arch</tt></h3>
 <p>
 Contains the target architecture name:
-"x86", "x64" or "ppcspe".
+"x86", "x64", "arm", "arm64", "arm64be", "ppc", "mips", "mipsel", "mips64", "mips64el", "mips64r6", "mips64r6el".
 </p>
 
 <h2 id="jit_opt"><tt>jit.opt.*</tt> &mdash; JIT compiler optimization control</h2>
 <p>
-This sub-module provides the backend for the <tt>-O</tt> command line
+This submodule provides the backend for the <tt>-O</tt> command line
 option.
 </p>
 <p>
@@ -176,7 +174,7 @@ which was one of the ways to enable optimization.
 
 <h2 id="jit_util"><tt>jit.util.*</tt> &mdash; JIT compiler introspection</h2>
 <p>
-This sub-module holds functions to introspect the bytecode, generated
+This submodule holds functions to introspect the bytecode, generated
 traces, the IR and the generated machine code. The functionality
 provided by this module is still in flux and therefore undocumented.
 </p>
@@ -189,7 +187,7 @@ if you want to know more.
 </div>
 <div id="foot">
 <hr class="hide">
-Copyright &copy; 2005-2014 Mike Pall
+Copyright &copy; 2005-2025
 <span class="noprint">
 &middot;
 <a href="contact.html">Contact</a>

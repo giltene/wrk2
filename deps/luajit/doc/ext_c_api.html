@@ -1,17 +1,16 @@
-<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+<!DOCTYPE html>
 <html>
 <head>
 <title>Lua/C API Extensions</title>
-<meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
-<meta name="Author" content="Mike Pall">
-<meta name="Copyright" content="Copyright (C) 2005-2014, Mike Pall">
+<meta charset="utf-8">
+<meta name="Copyright" content="Copyright (C) 2005-2025">
 <meta name="Language" content="en">
 <link rel="stylesheet" type="text/css" href="bluequad.css" media="screen">
 <link rel="stylesheet" type="text/css" href="bluequad-print.css" media="print">
 </head>
 <body>
 <div id="site">
-<a href="http://luajit.org"><span>Lua<span id="logo">JIT</span></span></a>
+<a href="https://luajit.org"><span>Lua<span id="logo">JIT</span></span></a>
 </div>
 <div id="head">
 <h1>Lua/C API Extensions</h1>
@@ -20,7 +19,7 @@
 <ul><li>
 <a href="luajit.html">LuaJIT</a>
 <ul><li>
-<a href="http://luajit.org/download.html">Download <span class="ext">&raquo;</span></a>
+<a href="https://luajit.org/download.html">Download <span class="ext">&raquo;</span></a>
 </li><li>
 <a href="install.html">Installation</a>
 </li><li>
@@ -38,23 +37,20 @@
 <a href="ext_ffi_semantics.html">FFI Semantics</a>
 </li></ul>
 </li><li>
+<a href="ext_buffer.html">String Buffers</a>
+</li><li>
 <a href="ext_jit.html">jit.* Library</a>
 </li><li>
 <a class="current" href="ext_c_api.html">Lua/C API</a>
+</li><li>
+<a href="ext_profiler.html">Profiler</a>
 </li></ul>
 </li><li>
-<a href="status.html">Status</a>
-<ul><li>
-<a href="changes.html">Changes</a>
-</li></ul>
+<a href="https://luajit.org/status.html">Status <span class="ext">&raquo;</span></a>
 </li><li>
-<a href="faq.html">FAQ</a>
+<a href="https://luajit.org/faq.html">FAQ <span class="ext">&raquo;</span></a>
 </li><li>
-<a href="http://luajit.org/performance.html">Performance <span class="ext">&raquo;</span></a>
-</li><li>
-<a href="http://wiki.luajit.org/">Wiki <span class="ext">&raquo;</span></a>
-</li><li>
-<a href="http://luajit.org/list.html">Mailing List <span class="ext">&raquo;</span></a>
+<a href="https://luajit.org/list.html">Mailing List <span class="ext">&raquo;</span></a>
 </li></ul>
 </div>
 <div id="main">
@@ -89,8 +85,8 @@ other Lua/C API functions).
 </p>
 <p>
 The third argument specifies the mode, which is 'or'ed with a flag.
-The flag can be <tt>LUAJIT_MODE_OFF</tt> to turn a feature on,
-<tt>LUAJIT_MODE_ON</tt> to turn a feature off, or
+The flag can be <tt>LUAJIT_MODE_OFF</tt> to turn a feature off,
+<tt>LUAJIT_MODE_ON</tt> to turn a feature on, or
 <tt>LUAJIT_MODE_FLUSH</tt> to flush cached code.
 </p>
 <p>
@@ -109,7 +105,7 @@ Turn the whole JIT compiler on or off or flush the whole cache of compiled code.
 This sets the mode for the function at the stack index <tt>idx</tt> or
 the parent of the calling function (<tt>idx = 0</tt>). It either
 enables JIT compilation for a function, disables it and flushes any
-already compiled code or only flushes already compiled code. This
+already compiled code, or only flushes already compiled code. This
 applies recursively to all sub-functions of the function with
 <tt>LUAJIT_MODE_ALLFUNC</tt> or only to the sub-functions with
 <tt>LUAJIT_MODE_ALLSUBFUNC</tt>.
@@ -128,7 +124,7 @@ traces which link to it.
 This mode defines a wrapper function for calls to C functions. If
 called with <tt>LUAJIT_MODE_ON</tt>, the stack index at <tt>idx</tt>
 must be a <tt>lightuserdata</tt> object holding a pointer to the wrapper
-function. From now on all C functions are called through the wrapper
+function. From now on, all C functions are called through the wrapper
 function. If called with <tt>LUAJIT_MODE_OFF</tt> this mode is turned
 off and all C functions are directly called.
 </p>
@@ -177,7 +173,7 @@ Also note that this mechanism is not without overhead.
 </div>
 <div id="foot">
 <hr class="hide">
-Copyright &copy; 2005-2014 Mike Pall
+Copyright &copy; 2005-2025
 <span class="noprint">
 &middot;
 <a href="contact.html">Contact</a>

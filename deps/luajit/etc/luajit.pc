@@ -1,7 +1,7 @@
 # Package information for LuaJIT to be used by pkg-config.
 majver=2
-minver=0
-relver=3
+minver=1
+relver=ROLLING
 version=${majver}.${minver}.${relver}
 abiver=5.1
 
@@ -17,7 +17,7 @@ INSTALL_CMOD=${prefix}/${multilib}/lua/${abiver}
 
 Name: LuaJIT
 Description: Just-in-time compiler for Lua
-URL: http://luajit.org
+URL: https://luajit.org
 Version: ${version}
 Requires:
 Libs: -L${libdir} -l${libname}

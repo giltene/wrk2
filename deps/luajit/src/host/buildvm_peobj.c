@@ -1,6 +1,6 @@
 /*
 ** LuaJIT VM builder: PE object emitter.
-** Copyright (C) 2005-2014 Mike Pall. See Copyright Notice in luajit.h
+** Copyright (C) 2005-2025 Mike Pall. See Copyright Notice in luajit.h
 **
 ** Only used for building on Windows, since we cannot assume the presence
 ** of a suitable assembler. The host and target byte order must match.
@@ -9,7 +9,7 @@
 #include "buildvm.h"
 #include "lj_bc.h"
 
-#if LJ_TARGET_X86ORX64 || LJ_TARGET_PPC
+#if LJ_TARGET_WINDOWS || LJ_TARGET_CYGWIN
 
 /* Context for PE object emitter. */
 static char *strtab;
@@ -93,12 +93,17 @@ typedef struct PEsymaux {
 #define PEOBJ_RELOC_ADDR32NB	0x03
 #define PEOBJ_RELOC_OFS		0
 #define PEOBJ_TEXT_FLAGS	0x60500020  /* 60=r+x, 50=align16, 20=code. */
-#elif LJ_TARGET_PPC
-#define PEOBJ_ARCH_TARGET	0x01f2
-#define PEOBJ_RELOC_REL32	0x06
-#define PEOBJ_RELOC_DIR32	0x02
+#define PEOBJ_PDATA_NRELOC	6
+#define PEOBJ_XDATA_SIZE	(8*2+4+6*2)
+#elif LJ_TARGET_ARM64
+#define PEOBJ_ARCH_TARGET	0xaa64
+#define PEOBJ_RELOC_REL32	0x03  /* MS: BRANCH26. */
+#define PEOBJ_RELOC_DIR32	0x01
+#define PEOBJ_RELOC_ADDR32NB	0x02
 #define PEOBJ_RELOC_OFS		(-4)
-#define PEOBJ_TEXT_FLAGS	0x60400020  /* 60=r+x, 40=align8, 20=code. */
+#define PEOBJ_TEXT_FLAGS	0x60500020  /* 60=r+x, 50=align16, 20=code. */
+#define PEOBJ_PDATA_NRELOC	4
+#define PEOBJ_XDATA_SIZE	(4+24+4 +4+8)
 #endif
 
 /* Section numbers (0-based). */
@@ -106,9 +111,11 @@ enum {
   PEOBJ_SECT_ABS = -2,
   PEOBJ_SECT_UNDEF = -1,
   PEOBJ_SECT_TEXT,
-#if LJ_TARGET_X64
+#ifdef PEOBJ_PDATA_NRELOC
   PEOBJ_SECT_PDATA,
   PEOBJ_SECT_XDATA,
+#elif LJ_TARGET_X86
+  PEOBJ_SECT_SXDATA,
 #endif
   PEOBJ_SECT_RDATA_Z,
   PEOBJ_NSECTIONS
@@ -179,6 +186,9 @@ void emit_peobj(BuildCtx *ctx)
   uint32_t sofs;
   int i, nrsym;
   union { uint8_t b; uint32_t u; } host_endian;
+#ifdef PEOBJ_PDATA_NRELOC
+  uint32_t fcofs = (uint32_t)ctx->sym[ctx->nsym-1].ofs;
+#endif
 
   sofs = sizeof(PEheader) + PEOBJ_NSECTIONS*sizeof(PEsection);
 
@@ -192,22 +202,29 @@ void emit_peobj(BuildCtx *ctx)
   /* Flags: 60 = read+execute, 50 = align16, 20 = code. */
   pesect[PEOBJ_SECT_TEXT].flags = PEOBJ_TEXT_FLAGS;
 
-#if LJ_TARGET_X64
+#ifdef PEOBJ_PDATA_NRELOC
   memcpy(pesect[PEOBJ_SECT_PDATA].name, ".pdata", sizeof(".pdata")-1);
   pesect[PEOBJ_SECT_PDATA].ofs = sofs;
-  sofs += (pesect[PEOBJ_SECT_PDATA].size = 6*4);
+  sofs += (pesect[PEOBJ_SECT_PDATA].size = PEOBJ_PDATA_NRELOC*4);
   pesect[PEOBJ_SECT_PDATA].relocofs = sofs;
-  sofs += (pesect[PEOBJ_SECT_PDATA].nreloc = 6) * PEOBJ_RELOC_SIZE;
+  sofs += (pesect[PEOBJ_SECT_PDATA].nreloc = PEOBJ_PDATA_NRELOC) * PEOBJ_RELOC_SIZE;
   /* Flags: 40 = read, 30 = align4, 40 = initialized data. */
   pesect[PEOBJ_SECT_PDATA].flags = 0x40300040;
 
   memcpy(pesect[PEOBJ_SECT_XDATA].name, ".xdata", sizeof(".xdata")-1);
   pesect[PEOBJ_SECT_XDATA].ofs = sofs;
-  sofs += (pesect[PEOBJ_SECT_XDATA].size = 8*2+4+6*2);  /* See below. */
+  sofs += (pesect[PEOBJ_SECT_XDATA].size = PEOBJ_XDATA_SIZE);  /* See below. */
   pesect[PEOBJ_SECT_XDATA].relocofs = sofs;
   sofs += (pesect[PEOBJ_SECT_XDATA].nreloc = 1) * PEOBJ_RELOC_SIZE;
   /* Flags: 40 = read, 30 = align4, 40 = initialized data. */
   pesect[PEOBJ_SECT_XDATA].flags = 0x40300040;
+#elif LJ_TARGET_X86
+  memcpy(pesect[PEOBJ_SECT_SXDATA].name, ".sxdata", sizeof(".sxdata")-1);
+  pesect[PEOBJ_SECT_SXDATA].ofs = sofs;
+  sofs += (pesect[PEOBJ_SECT_SXDATA].size = 4);
+  pesect[PEOBJ_SECT_SXDATA].relocofs = sofs;
+  /* Flags: 40 = read, 30 = align4, 02 = lnk_info, 40 = initialized data. */
+  pesect[PEOBJ_SECT_SXDATA].flags = 0x40300240;
 #endif
 
   memcpy(pesect[PEOBJ_SECT_RDATA_Z].name, ".rdata$Z", sizeof(".rdata$Z")-1);
@@ -231,8 +248,8 @@ void emit_peobj(BuildCtx *ctx)
   */
   nrsym = ctx->nrelocsym;
   pehdr.nsyms = 1+PEOBJ_NSECTIONS*2 + 1+ctx->nsym + nrsym;
-#if LJ_TARGET_X64
-  pehdr.nsyms += 1;  /* Symbol for lj_err_unwind_win64. */
+#ifdef PEOBJ_PDATA_NRELOC
+  pehdr.nsyms += 1;  /* Symbol for lj_err_unwind_win. */
 #endif
 
   /* Write PE object header and all sections. */
@@ -242,15 +259,8 @@ void emit_peobj(BuildCtx *ctx)
   /* Write .text section. */
   host_endian.u = 1;
   if (host_endian.b != LJ_ENDIAN_SELECT(1, 0)) {
-#if LJ_TARGET_PPC
-    uint32_t *p = (uint32_t *)ctx->code;
-    int n = (int)(ctx->codesz >> 2);
-    for (i = 0; i < n; i++, p++)
-      *p = lj_bswap(*p);  /* Byteswap .text section. */
-#else
     fprintf(stderr, "Error: different byte order for host and target\n");
     exit(1);
-#endif
   }
   owrite(ctx, ctx->code, ctx->codesz);
   for (i = 0; i < ctx->nreloc; i++) {
@@ -263,7 +273,6 @@ void emit_peobj(BuildCtx *ctx)
 
 #if LJ_TARGET_X64
   { /* Write .pdata section. */
-    uint32_t fcofs = (uint32_t)ctx->sym[ctx->nsym-1].ofs;
     uint32_t pdata[3];  /* Start of .text, end of .text and .xdata. */
     PEreloc reloc;
     pdata[0] = 0; pdata[1] = fcofs; pdata[2] = 0;
@@ -312,6 +321,100 @@ void emit_peobj(BuildCtx *ctx)
     reloc.type = PEOBJ_RELOC_ADDR32NB;
     owrite(ctx, &reloc, PEOBJ_RELOC_SIZE);
   }
+#elif LJ_TARGET_ARM64
+  /* https://learn.microsoft.com/en-us/cpp/build/arm64-exception-handling */
+  { /* Write .pdata section. */
+    uint32_t pdata[4];
+    PEreloc reloc;
+    pdata[0] = 0;
+    pdata[1] = 0;
+    pdata[2] = fcofs;
+    pdata[3] = 4+24+4;
+    owrite(ctx, &pdata, sizeof(pdata));
+    /* Start of .text and start of .xdata. */
+    reloc.vaddr = 0; reloc.symidx = 1+2+nrsym+2+2+1;
+    reloc.type = PEOBJ_RELOC_ADDR32NB;
+    owrite(ctx, &reloc, PEOBJ_RELOC_SIZE);
+    reloc.vaddr = 4; reloc.symidx = 1+2+nrsym+2;
+    reloc.type = PEOBJ_RELOC_ADDR32NB;
+    owrite(ctx, &reloc, PEOBJ_RELOC_SIZE);
+    /* Start of vm_ffi_call and start of second part of .xdata. */
+    reloc.vaddr = 8; reloc.symidx = 1+2+nrsym+2+2+1;
+    reloc.type = PEOBJ_RELOC_ADDR32NB;
+    owrite(ctx, &reloc, PEOBJ_RELOC_SIZE);
+    reloc.vaddr = 12; reloc.symidx = 1+2+nrsym+2;
+    reloc.type = PEOBJ_RELOC_ADDR32NB;
+    owrite(ctx, &reloc, PEOBJ_RELOC_SIZE);
+  }
+  { /* Write .xdata section. */
+    uint32_t u32;
+    uint8_t *p, uwc[24];
+    PEreloc reloc;
+
+#define CBE16(x)	(*p = ((x) >> 8) & 0xff, p[1] = (x) & 0xff, p += 2)
+#define CALLOC_S(s)	(*p++ = ((s) >> 4))  /* s < 512 */
+#define CSAVE_FPLR(o)	(*p++ = 0x40 | ((o) >> 3))  /* o <= 504 */
+#define CSAVE_REGP(r,o)	CBE16(0xc800 | (((r) - 19) << 6) | ((o) >> 3))
+#define CSAVE_REGS(r1,r2,o1) do { \
+  int r, o; for (r = r1, o = o1; r <= r2; r += 2, o -= 16) CSAVE_REGP(r, o); \
+} while (0)
+#define CSAVE_REGPX(r,o) CBE16(0xcc00 | (((r) - 19) << 6) | (~(o) >> 3))
+#define CSAVE_FREGP(r,o) CBE16(0xd800 | (((r) - 8) << 6) | ((o) >> 3))
+#define CSAVE_FREGS(r1,r2,o1) do { \
+  int r, o; for (r = r1, o = o1; r <= r2; r += 2, o -= 16) CSAVE_FREGP(r, o); \
+} while (0)
+#define CADD_FP(s)	CBE16(0xe200 | ((s) >> 3))  /* s < 8*256 */
+#define CODE_NOP	0xe3
+#define CODE_END	0xe4
+#define CEND_ALIGN	do { \
+  *p++ = CODE_END; \
+  while ((p - uwc) & 3) *p++ = CODE_NOP; \
+} while (0)
+
+    /* Unwind codes for .text section with handler. */
+    p = uwc;
+    CADD_FP(192);		/* +2 */
+    CSAVE_REGS(19, 28, 176);	/* +5*2 */
+    CSAVE_FREGS(8, 15, 96);	/* +4*2 */
+    CSAVE_FPLR(192);		/* +1 */
+    CALLOC_S(208);		/* +1 */
+    CEND_ALIGN;			/* +1 +1 -> 24 */
+
+    u32 = ((24u >> 2) << 27) | (1u << 20) | (fcofs >> 2);
+    owrite(ctx, &u32, 4);
+    owrite(ctx, &uwc, 24);
+
+    u32 = 0;  /* Handler RVA to be relocated at 4 + 24. */
+    owrite(ctx, &u32, 4);
+
+    /* Unwind codes for vm_ffi_call without handler. */
+    p = uwc;
+    CADD_FP(16);		/* +2 */
+    CSAVE_FPLR(16);		/* +1 */
+    CSAVE_REGPX(19, -32);	/* +2 */
+    CEND_ALIGN;			/* +1 +2 -> 8 */
+
+    u32 = ((8u >> 2) << 27) | (((uint32_t)ctx->codesz - fcofs) >> 2);
+    owrite(ctx, &u32, 4);
+    owrite(ctx, &uwc, 8);
+
+    reloc.vaddr = 4 + 24; reloc.symidx = 1+2+nrsym+2+2;
+    reloc.type = PEOBJ_RELOC_ADDR32NB;
+    owrite(ctx, &reloc, PEOBJ_RELOC_SIZE);
+  }
+#elif LJ_TARGET_X86
+  /* Write .sxdata section. */
+  for (i = 0; i < nrsym; i++) {
+    if (!strcmp(ctx->relocsym[i], "_lj_err_unwind_win")) {
+      uint32_t symidx = 1+2+i;
+      owrite(ctx, &symidx, 4);
+      break;
+    }
+  }
+  if (i == nrsym) {
+    fprintf(stderr, "Error: extern lj_err_unwind_win not used\n");
+    exit(1);
+  }
 #endif
 
   /* Write .rdata$Z section. */
@@ -330,11 +433,13 @@ void emit_peobj(BuildCtx *ctx)
       emit_peobj_sym(ctx, ctx->relocsym[i], 0,
 		     PEOBJ_SECT_UNDEF, PEOBJ_TYPE_FUNC, PEOBJ_SCL_EXTERN);
 
-#if LJ_TARGET_X64
+#ifdef PEOBJ_PDATA_NRELOC
     emit_peobj_sym_sect(ctx, pesect, PEOBJ_SECT_PDATA);
     emit_peobj_sym_sect(ctx, pesect, PEOBJ_SECT_XDATA);
-    emit_peobj_sym(ctx, "lj_err_unwind_win64", 0,
+    emit_peobj_sym(ctx, "lj_err_unwind_win", 0,
 		   PEOBJ_SECT_UNDEF, PEOBJ_TYPE_FUNC, PEOBJ_SCL_EXTERN);
+#elif LJ_TARGET_X86
+    emit_peobj_sym_sect(ctx, pesect, PEOBJ_SECT_SXDATA);
 #endif
 
     emit_peobj_sym(ctx, ctx->beginsym, 0,

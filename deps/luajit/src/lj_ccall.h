@@ -1,6 +1,6 @@
 /*
 ** FFI C call handling.
-** Copyright (C) 2005-2014 Mike Pall. See Copyright Notice in luajit.h
+** Copyright (C) 2005-2025 Mike Pall. See Copyright Notice in luajit.h
 */
 
 #ifndef _LJ_CCALL_H
@@ -68,35 +68,59 @@ typedef union FPRArg {
   float f[2];
 } FPRArg;
 
+#elif LJ_TARGET_ARM64
+
+#define CCALL_NARG_GPR		8
+#define CCALL_NRET_GPR		2
+#define CCALL_NARG_FPR		8
+#define CCALL_NRET_FPR		4
+#define CCALL_SPS_FREE		0
+#if LJ_TARGET_OSX
+#define CCALL_PACK_STACKARG	1
+#endif
+
+typedef intptr_t GPRArg;
+typedef union FPRArg {
+  double d;
+  struct { LJ_ENDIAN_LOHI(float f; , float g;) };
+  struct { LJ_ENDIAN_LOHI(uint32_t lo; , uint32_t hi;) };
+} FPRArg;
+
 #elif LJ_TARGET_PPC
 
 #define CCALL_NARG_GPR		8
-#define CCALL_NARG_FPR		8
+#define CCALL_NARG_FPR		(LJ_ABI_SOFTFP ? 0 : 8)
 #define CCALL_NRET_GPR		4	/* For complex double. */
-#define CCALL_NRET_FPR		1
+#define CCALL_NRET_FPR		(LJ_ABI_SOFTFP ? 0 : 1)
 #define CCALL_SPS_EXTRA		4
 #define CCALL_SPS_FREE		0
 
 typedef intptr_t GPRArg;
 typedef double FPRArg;
 
-#elif LJ_TARGET_PPCSPE
-
-#define CCALL_NARG_GPR		8
-#define CCALL_NARG_FPR		0
-#define CCALL_NRET_GPR		4	/* For softfp complex double. */
-#define CCALL_NRET_FPR		0
-#define CCALL_SPS_FREE		0	/* NYI */
-
-typedef intptr_t GPRArg;
-
-#elif LJ_TARGET_MIPS
+#elif LJ_TARGET_MIPS32
 
 #define CCALL_NARG_GPR		4
-#define CCALL_NARG_FPR		2
-#define CCALL_NRET_GPR		2
-#define CCALL_NRET_FPR		2
+#define CCALL_NARG_FPR		(LJ_ABI_SOFTFP ? 0 : 2)
+#define CCALL_NRET_GPR		(LJ_ABI_SOFTFP ? 4 : 2)
+#define CCALL_NRET_FPR		(LJ_ABI_SOFTFP ? 0 : 2)
 #define CCALL_SPS_EXTRA		7
+#define CCALL_SPS_FREE		1
+
+typedef intptr_t GPRArg;
+typedef union FPRArg {
+  double d;
+  struct { LJ_ENDIAN_LOHI(float f; , float g;) };
+} FPRArg;
+
+#elif LJ_TARGET_MIPS64
+
+/* FP args are positional and overlay the GPR array. */
+#define CCALL_NARG_GPR		8
+#define CCALL_NARG_FPR		0
+#define CCALL_NRET_GPR		2
+#define CCALL_NRET_FPR		(LJ_ABI_SOFTFP ? 0 : 2)
+#define CCALL_SPS_EXTRA		3
 #define CCALL_SPS_FREE		1
 
 typedef intptr_t GPRArg;
@@ -118,6 +142,9 @@ typedef union FPRArg {
 #ifndef CCALL_ALIGN_STACKARG
 #define CCALL_ALIGN_STACKARG	1
 #endif
+#ifndef CCALL_PACK_STACKARG
+#define CCALL_PACK_STACKARG	0
+#endif
 #ifndef CCALL_ALIGN_CALLSTATE
 #define CCALL_ALIGN_CALLSTATE	8
 #endif
@@ -131,20 +158,23 @@ typedef union FPRArg {
 LJ_STATIC_ASSERT(CCALL_NUM_GPR <= CCALL_MAX_GPR);
 LJ_STATIC_ASSERT(CCALL_NUM_FPR <= CCALL_MAX_FPR);
 
-#define CCALL_MAXSTACK		32
+#define CCALL_NUM_STACK		31
+#define CCALL_SIZE_STACK	(CCALL_NUM_STACK * CTSIZE_PTR)
 
 /* -- C call state -------------------------------------------------------- */
 
 typedef LJ_ALIGN(CCALL_ALIGN_CALLSTATE) struct CCallState {
   void (*func)(void);		/* Pointer to called function. */
   uint32_t spadj;		/* Stack pointer adjustment. */
-  uint8_t nsp;			/* Number of stack slots. */
+  uint8_t nsp;			/* Number of bytes on stack. */
   uint8_t retref;		/* Return value by reference. */
 #if LJ_TARGET_X64
   uint8_t ngpr;			/* Number of arguments in GPRs. */
   uint8_t nfpr;			/* Number of arguments in FPRs. */
 #elif LJ_TARGET_X86
   uint8_t resx87;		/* Result on x87 stack: 1:float, 2:double. */
+#elif LJ_TARGET_ARM64
+  void *retp;			/* Aggregate return pointer in x8. */
 #elif LJ_TARGET_PPC
   uint8_t nfpr;			/* Number of arguments in FPRs. */
 #endif
@@ -155,7 +185,7 @@ typedef LJ_ALIGN(CCALL_ALIGN_CALLSTATE) struct CCallState {
   FPRArg fpr[CCALL_NUM_FPR];	/* Arguments/results in FPRs. */
 #endif
   GPRArg gpr[CCALL_NUM_GPR];	/* Arguments/results in GPRs. */
-  GPRArg stack[CCALL_MAXSTACK];	/* Stack slots. */
+  GPRArg stack[CCALL_NUM_STACK];	/* Stack slots. */
 } CCallState;
 
 /* -- C call handling ----------------------------------------------------- */

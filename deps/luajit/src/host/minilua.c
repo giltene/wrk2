@@ -1134,7 +1134,7 @@ if(!cl->isC){
 CallInfo*ci;
 StkId st,base;
 Proto*p=cl->p;
-luaD_checkstack(L,p->maxstacksize);
+luaD_checkstack(L,p->maxstacksize+p->numparams);
 func=restorestack(L,funcr);
 if(!p->is_vararg){
 base=func+1;
@@ -1606,7 +1606,7 @@ luaC_barriert(L,t,key);
 return gval(mp);
 }
 static const TValue*luaH_getnum(Table*t,int key){
-if(cast(unsigned int,key-1)<cast(unsigned int,t->sizearray))
+if(cast(unsigned int,key)-1<cast(unsigned int,t->sizearray))
 return&t->array[key-1];
 else{
 lua_Number nk=cast_num(key);
@@ -1639,6 +1639,7 @@ lua_number2int(k,n);
 if(luai_numeq(cast_num(k),nvalue(key)))
 return luaH_getnum(t,k);
 }
+/*fallthrough*/
 default:{
 Node*n=mainposition(t,key);
 do{
@@ -2905,8 +2906,8 @@ if(sep>=0){
 read_long_string(ls,seminfo,sep);
 return TK_STRING;
 }
-else if(sep==-1)return'[';
-else luaX_lexerror(ls,"invalid long string delimiter",TK_STRING);
+else if (sep!=-1)luaX_lexerror(ls,"invalid long string delimiter",TK_STRING);
+return'[';
 }
 case'=':{
 next(ls);
