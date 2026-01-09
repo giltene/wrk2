@@ -177,8 +177,9 @@ int main(int argc, char **argv) {
     sigaction(SIGINT, &sa, NULL);
 
     char *time = format_time_s(cfg.duration);
-    printf("Running %s test @ %s\n", time, url);
-    printf("  %"PRIu64" threads and %"PRIu64" connections\n",
+    FILE *log = (cfg.output_file && strcmp(cfg.output_file, "-") == 0) ? stderr : stdout;
+    fprintf(log, "Running %s test @ %s\n", time, url);
+    fprintf(log, "  %"PRIu64" threads and %"PRIu64" connections\n",
             cfg.threads, cfg.connections);
 
     uint64_t start    = time_us();
@@ -392,7 +393,8 @@ static int calibrate(aeEventLoop *loop, long long id, void *data) {
     thread->interval = interval;
     thread->requests = 0;
 
-    printf("  Thread calibration: mean lat.: %.3fms, rate sampling interval: %dms\n",
+    FILE *log = (cfg.output_file && strcmp(cfg.output_file, "-") == 0) ? stderr : stdout;
+    fprintf(log, "  Thread calibration: mean lat.: %.3fms, rate sampling interval: %dms\n",
             (thread->mean)/1000.0,
             thread->interval);
 
