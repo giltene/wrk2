@@ -7,6 +7,11 @@
 #include "stats.h"
 #include "zmalloc.h"
 
+// Compatibility with newer LuaJIT that uses luaL_Reg instead of luaL_reg
+#ifndef luaL_reg
+#define luaL_reg luaL_Reg
+#endif
+
 typedef struct {
     char *name;
     int   type;

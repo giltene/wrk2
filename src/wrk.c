@@ -9,6 +9,8 @@
 // Max recordable latency of 1 day
 #define MAX_LATENCY 24L * 60 * 60 * 1000000
 
+#define MAX_PERCENTILES 32
+
 static struct config {
     uint64_t threads;
     uint64_t connections;
@@ -24,6 +26,9 @@ static struct config {
     char    *host;
     char    *script;
     SSL_CTX *ctx;
+    char    *output_file;
+    double   percentiles[MAX_PERCENTILES];
+    int      num_percentiles;
 } cfg;
 
 static struct {
@@ -44,6 +49,15 @@ static struct http_parser_settings parser_settings = {
 };
 
 static volatile sig_atomic_t stop = 0;
+
+// Forward declarations for output functions
+static void print_text_results(uint64_t, errors *, uint64_t, uint64_t,
+                               struct hdr_histogram *, struct hdr_histogram *,
+                               lua_State *);
+static void print_json_latency(FILE *, const char *, struct hdr_histogram *, int);
+static int print_json_results(const char *, const char *, uint64_t, errors *,
+                              uint64_t, uint64_t, struct hdr_histogram *,
+                              struct hdr_histogram *);
 
 static void handler(int sig) {
     stop = 1;
@@ -68,7 +82,12 @@ static void usage() {
            "    -R, --rate        <T>  work rate (throughput)     \n"
            "                           in requests/sec (total)    \n"
            "                           [Required Parameter]       \n"
-           "                                                      \n"
+           "    -p, --percentiles <P>  Latency percentiles to     \n"
+           "                           compute (comma-separated,  \n"
+           "                           default: 50,75,90,99,      \n"
+           "                           99.9,99.99,99.999,100)     \n"
+           "    -o, --output      <F>  Output results as JSON     \n"
+           "                           (use - for stdout)         \n"
            "                                                      \n"
            "  Numeric arguments may include a SI unit (1k, 1M, 1G)\n"
            "  Time arguments may include a time unit (2s, 2m, 2h)\n");
@@ -159,8 +178,9 @@ int main(int argc, char **argv) {
     sigaction(SIGINT, &sa, NULL);
 
     char *time = format_time_s(cfg.duration);
-    printf("Running %s test @ %s\n", time, url);
-    printf("  %"PRIu64" threads and %"PRIu64" connections\n",
+    FILE *log = (cfg.output_file && strcmp(cfg.output_file, "-") == 0) ? stderr : stdout;
+    fprintf(log, "Running %s test @ %s\n", time, url);
+    fprintf(log, "  %"PRIu64" threads and %"PRIu64" connections\n",
             cfg.threads, cfg.connections);
 
     uint64_t start    = time_us();
@@ -195,6 +215,24 @@ int main(int argc, char **argv) {
         hdr_add(u_latency_histogram, t->u_latency_histogram);
     }
 
+    if (cfg.output_file) {
+        int err = print_json_results(cfg.output_file, url, complete, &errors,
+                                     runtime_us, bytes, latency_histogram,
+                                     cfg.u_latency ? u_latency_histogram : NULL);
+        if (err) return err;
+    } else {
+        print_text_results(complete, &errors, runtime_us, bytes,
+                           latency_histogram, u_latency_histogram, L);
+    }
+
+    return 0;
+}
+
+static void print_text_results(uint64_t complete, errors *errors,
+                               uint64_t runtime_us, uint64_t bytes,
+                               struct hdr_histogram *latency_histogram,
+                               struct hdr_histogram *u_latency_histogram,
+                               lua_State *L) {
     long double runtime_s   = runtime_us / 1000000.0;
     long double req_per_s   = complete   / runtime_s;
     long double bytes_per_s = bytes      / runtime_s;
@@ -226,13 +264,13 @@ int main(int argc, char **argv) {
 
     printf("  %"PRIu64" requests in %s, %sB read\n",
             complete, runtime_msg, format_binary(bytes));
-    if (errors.connect || errors.read || errors.write || errors.timeout) {
+    if (errors->connect || errors->read || errors->write || errors->timeout) {
         printf("  Socket errors: connect %d, read %d, write %d, timeout %d\n",
-               errors.connect, errors.read, errors.write, errors.timeout);
+               errors->connect, errors->read, errors->write, errors->timeout);
     }
 
-    if (errors.status) {
-        printf("  Non-2xx or 3xx responses: %d\n", errors.status);
+    if (errors->status) {
+        printf("  Non-2xx or 3xx responses: %d\n", errors->status);
     }
 
     printf("Requests/sec: %9.2Lf\n", req_per_s);
@@ -240,11 +278,9 @@ int main(int argc, char **argv) {
 
     if (script_has_done(L)) {
         script_summary(L, runtime_us, complete, bytes);
-        script_errors(L, &errors);
+        script_errors(L, errors);
         script_done(L, latency_stats, statistics.requests);
     }
-
-    return 0;
 }
 
 void *thread_main(void *arg) {
@@ -359,7 +395,8 @@ static int calibrate(aeEventLoop *loop, long long id, void *data) {
     thread->interval = interval;
     thread->requests = 0;
 
-    printf("  Thread calibration: mean lat.: %.3fms, rate sampling interval: %dms\n",
+    FILE *log = (cfg.output_file && strcmp(cfg.output_file, "-") == 0) ? stderr : stdout;
+    fprintf(log, "  Thread calibration: mean lat.: %.3fms, rate sampling interval: %dms\n",
             (thread->mean)/1000.0,
             thread->interval);
 
@@ -691,6 +728,33 @@ static char *copy_url_part(char *url, struct http_parser_url *parts, enum http_p
     return part;
 }
 
+static int parse_percentiles(char *spec, double *percentiles, int *count) {
+    char *str = strdup(spec);
+    char *token;
+    int n = 0;
+
+    token = strtok(str, ",");
+    while (token != NULL && n < MAX_PERCENTILES) {
+        char *endptr;
+        double val = strtod(token, &endptr);
+        if (*endptr != '\0' || val <= 0 || val > 100) {
+            fprintf(stderr, "invalid percentile: %s\n", token);
+            free(str);
+            return -1;
+        }
+        percentiles[n++] = val;
+        token = strtok(NULL, ",");
+    }
+
+    free(str);
+    if (n == 0) {
+        fprintf(stderr, "no valid percentiles specified\n");
+        return -1;
+    }
+    *count = n;
+    return 0;
+}
+
 static struct option longopts[] = {
     { "connections",    required_argument, NULL, 'c' },
     { "duration",       required_argument, NULL, 'd' },
@@ -704,6 +768,8 @@ static struct option longopts[] = {
     { "help",           no_argument,       NULL, 'h' },
     { "version",        no_argument,       NULL, 'v' },
     { "rate",           required_argument, NULL, 'R' },
+    { "percentiles",    required_argument, NULL, 'p' },
+    { "output",         required_argument, NULL, 'o' },
     { NULL,             0,                 NULL,  0  }
 };
 
@@ -718,7 +784,7 @@ static int parse_args(struct config *cfg, char **url, struct http_parser_url *pa
     cfg->rate        = 0;
     cfg->record_all_responses = true;
 
-    while ((c = getopt_long(argc, argv, "t:c:d:s:H:T:R:LUBrv?", longopts, NULL)) != -1) {
+    while ((c = getopt_long(argc, argv, "t:c:d:s:H:T:R:p:o:LUBrv?", longopts, NULL)) != -1) {
         switch (c) {
             case 't':
                 if (scan_metric(optarg, &cfg->threads)) return -1;
@@ -751,6 +817,12 @@ static int parse_args(struct config *cfg, char **url, struct http_parser_url *pa
                 break;
             case 'R':
                 if (scan_metric(optarg, &cfg->rate)) return -1;
+                break;
+            case 'p':
+                if (parse_percentiles(optarg, cfg->percentiles, &cfg->num_percentiles)) return -1;
+                break;
+            case 'o':
+                cfg->output_file = optarg;
                 break;
             case 'v':
                 printf("wrk %s [%s] ", VERSION, aeGetApiName());
@@ -785,6 +857,19 @@ static int parse_args(struct config *cfg, char **url, struct http_parser_url *pa
     *url    = argv[optind];
     *header = NULL;
 
+    // Set default percentiles if none specified
+    if (cfg->num_percentiles == 0) {
+        cfg->percentiles[0] = 50.0;
+        cfg->percentiles[1] = 75.0;
+        cfg->percentiles[2] = 90.0;
+        cfg->percentiles[3] = 99.0;
+        cfg->percentiles[4] = 99.9;
+        cfg->percentiles[5] = 99.99;
+        cfg->percentiles[6] = 99.999;
+        cfg->percentiles[7] = 100.0;
+        cfg->num_percentiles = 8;
+    }
+
     return 0;
 }
 
@@ -818,12 +903,11 @@ static void print_stats(char *name, stats *stats, char *(*fmt)(long double)) {
 }
 
 static void print_hdr_latency(struct hdr_histogram* histogram, const char* description) {
-    long double percentiles[] = { 50.0, 75.0, 90.0, 99.0, 99.9, 99.99, 99.999, 100.0};
     printf("  Latency Distribution (HdrHistogram - %s)\n", description);
-    for (size_t i = 0; i < sizeof(percentiles) / sizeof(long double); i++) {
-        long double p = percentiles[i];
+    for (int i = 0; i < cfg.num_percentiles; i++) {
+        double p = cfg.percentiles[i];
         int64_t n = hdr_value_at_percentile(histogram, p);
-        printf("%7.3Lf%%", p);
+        printf("%7.3f%%", p);
         print_units(n, format_time_us, 10);
         printf("\n");
     }
@@ -842,3 +926,85 @@ static void print_stats_latency(stats *stats) {
         printf("\n");
     }
 }
+
+static int print_json_results(const char *filename, const char *url,
+                              uint64_t complete, errors *err,
+                              uint64_t runtime_us, uint64_t bytes,
+                              struct hdr_histogram *latency_histogram,
+                              struct hdr_histogram *u_latency_histogram) {
+    FILE *out;
+    if (strcmp(filename, "-") == 0) {
+        out = stdout;
+    } else {
+        out = fopen(filename, "w");
+        if (!out) {
+            fprintf(stderr, "unable to open output file: %s\n", filename);
+            return 1;
+        }
+    }
+
+    long double runtime_s = runtime_us / 1000000.0;
+    long double req_per_s = complete / runtime_s;
+    long double bytes_per_s = bytes / runtime_s;
+    uint32_t total_errors = err->connect + err->read + err->write + err->status + err->timeout;
+
+    fprintf(out, "{\n");
+    fprintf(out, "  \"url\": \"%s\",\n", url);
+    fprintf(out, "  \"config\": {\n");
+    fprintf(out, "    \"threads\": %"PRIu64",\n", cfg.threads);
+    fprintf(out, "    \"connections\": %"PRIu64",\n", cfg.connections);
+    fprintf(out, "    \"duration_s\": %"PRIu64",\n", cfg.duration);
+    fprintf(out, "    \"rate\": %"PRIu64"\n", cfg.rate);
+    fprintf(out, "  },\n");
+    fprintf(out, "  \"requests\": %"PRIu64",\n", complete);
+    fprintf(out, "  \"errors\": {\n");
+    fprintf(out, "    \"connect\": %"PRIu32",\n", err->connect);
+    fprintf(out, "    \"read\": %"PRIu32",\n", err->read);
+    fprintf(out, "    \"write\": %"PRIu32",\n", err->write);
+    fprintf(out, "    \"status\": %"PRIu32",\n", err->status);
+    fprintf(out, "    \"timeout\": %"PRIu32",\n", err->timeout);
+    fprintf(out, "    \"total\": %"PRIu32"\n", total_errors);
+    fprintf(out, "  },\n");
+    fprintf(out, "  \"bytes\": %"PRIu64",\n", bytes);
+    fprintf(out, "  \"duration_seconds\": %.6Lf,\n", runtime_s);
+    fprintf(out, "  \"rps\": %.6Lf,\n", req_per_s);
+    fprintf(out, "  \"bytes_per_second\": %.6Lf,\n", bytes_per_s);
+
+    print_json_latency(out, "latency_us", latency_histogram, 2);
+
+    if (u_latency_histogram) {
+        fprintf(out, ",\n");
+        print_json_latency(out, "uncorrected_latency_us", u_latency_histogram, 2);
+    }
+
+    fprintf(out, "\n}\n");
+
+    if (out != stdout) fclose(out);
+    return 0;
+}
+
+static void print_json_latency(FILE *out, const char *name, struct hdr_histogram *h, int indent) {
+    fprintf(out, "%*s\"%s\": {\n", indent, "", name);
+    fprintf(out, "%*s\"min\": %"PRId64",\n", indent + 2, "", hdr_min(h));
+    fprintf(out, "%*s\"max\": %"PRId64",\n", indent + 2, "", hdr_max(h));
+    fprintf(out, "%*s\"mean\": %g,\n", indent + 2, "", hdr_mean(h));
+    fprintf(out, "%*s\"stdev\": %g", indent + 2, "", hdr_stddev(h));
+
+    for (int i = 0; i < cfg.num_percentiles; i++) {
+        double p = cfg.percentiles[i];
+        int64_t val = hdr_value_at_percentile(h, p);
+        fprintf(out, ",\n");
+        // Format percentile key: p50, p75, p99, p99_9, p99_99, etc.
+        if (p == (int)p) {
+            fprintf(out, "%*s\"p%d\": %"PRId64, indent + 2, "", (int)p, val);
+        } else if (p * 10 == (int)(p * 10)) {
+            fprintf(out, "%*s\"p%.1f\": %"PRId64, indent + 2, "", p, val);
+        } else if (p * 100 == (int)(p * 100)) {
+            fprintf(out, "%*s\"p%.2f\": %"PRId64, indent + 2, "", p, val);
+        } else {
+            fprintf(out, "%*s\"p%.3f\": %"PRId64, indent + 2, "", p, val);
+        }
+    }
+    fprintf(out, "\n%*s}", indent, "");
+}
+
