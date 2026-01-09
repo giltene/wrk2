@@ -55,8 +55,9 @@ static void print_text_results(uint64_t, errors *, uint64_t, uint64_t,
                                struct hdr_histogram *, struct hdr_histogram *,
                                lua_State *);
 static void print_json_latency(FILE *, const char *, struct hdr_histogram *, int);
-static void print_json_results(const char *, uint64_t, errors *, uint64_t, uint64_t,
-                               struct hdr_histogram *, struct hdr_histogram *);
+static int print_json_results(const char *, const char *, uint64_t, errors *,
+                              uint64_t, uint64_t, struct hdr_histogram *,
+                              struct hdr_histogram *);
 
 static void handler(int sig) {
     stop = 1;
@@ -215,9 +216,10 @@ int main(int argc, char **argv) {
     }
 
     if (cfg.output_file) {
-        print_json_results(cfg.output_file, complete, &errors, runtime_us, bytes,
-                           latency_histogram,
-                           cfg.u_latency ? u_latency_histogram : NULL);
+        int err = print_json_results(cfg.output_file, url, complete, &errors,
+                                     runtime_us, bytes, latency_histogram,
+                                     cfg.u_latency ? u_latency_histogram : NULL);
+        if (err) return err;
     } else {
         print_text_results(complete, &errors, runtime_us, bytes,
                            latency_histogram, u_latency_histogram, L);
@@ -925,10 +927,11 @@ static void print_stats_latency(stats *stats) {
     }
 }
 
-static void print_json_results(const char *filename, uint64_t complete, errors *err,
-                               uint64_t runtime_us, uint64_t bytes,
-                               struct hdr_histogram *latency_histogram,
-                               struct hdr_histogram *u_latency_histogram) {
+static int print_json_results(const char *filename, const char *url,
+                              uint64_t complete, errors *err,
+                              uint64_t runtime_us, uint64_t bytes,
+                              struct hdr_histogram *latency_histogram,
+                              struct hdr_histogram *u_latency_histogram) {
     FILE *out;
     if (strcmp(filename, "-") == 0) {
         out = stdout;
@@ -936,15 +939,23 @@ static void print_json_results(const char *filename, uint64_t complete, errors *
         out = fopen(filename, "w");
         if (!out) {
             fprintf(stderr, "unable to open output file: %s\n", filename);
-            return;
+            return 1;
         }
     }
 
     long double runtime_s = runtime_us / 1000000.0;
     long double req_per_s = complete / runtime_s;
+    long double bytes_per_s = bytes / runtime_s;
     uint32_t total_errors = err->connect + err->read + err->write + err->status + err->timeout;
 
     fprintf(out, "{\n");
+    fprintf(out, "  \"url\": \"%s\",\n", url);
+    fprintf(out, "  \"config\": {\n");
+    fprintf(out, "    \"threads\": %"PRIu64",\n", cfg.threads);
+    fprintf(out, "    \"connections\": %"PRIu64",\n", cfg.connections);
+    fprintf(out, "    \"duration_s\": %"PRIu64",\n", cfg.duration);
+    fprintf(out, "    \"rate\": %"PRIu64"\n", cfg.rate);
+    fprintf(out, "  },\n");
     fprintf(out, "  \"requests\": %"PRIu64",\n", complete);
     fprintf(out, "  \"errors\": {\n");
     fprintf(out, "    \"connect\": %"PRIu32",\n", err->connect);
@@ -955,8 +966,9 @@ static void print_json_results(const char *filename, uint64_t complete, errors *
     fprintf(out, "    \"total\": %"PRIu32"\n", total_errors);
     fprintf(out, "  },\n");
     fprintf(out, "  \"bytes\": %"PRIu64",\n", bytes);
-    fprintf(out, "  \"duration_seconds\": %.3Lf,\n", runtime_s);
-    fprintf(out, "  \"rps\": %.2Lf,\n", req_per_s);
+    fprintf(out, "  \"duration_seconds\": %.6Lf,\n", runtime_s);
+    fprintf(out, "  \"rps\": %.6Lf,\n", req_per_s);
+    fprintf(out, "  \"bytes_per_second\": %.6Lf,\n", bytes_per_s);
 
     print_json_latency(out, "latency_us", latency_histogram, 2);
 
@@ -968,14 +980,15 @@ static void print_json_results(const char *filename, uint64_t complete, errors *
     fprintf(out, "\n}\n");
 
     if (out != stdout) fclose(out);
+    return 0;
 }
 
 static void print_json_latency(FILE *out, const char *name, struct hdr_histogram *h, int indent) {
     fprintf(out, "%*s\"%s\": {\n", indent, "", name);
     fprintf(out, "%*s\"min\": %"PRId64",\n", indent + 2, "", hdr_min(h));
     fprintf(out, "%*s\"max\": %"PRId64",\n", indent + 2, "", hdr_max(h));
-    fprintf(out, "%*s\"mean\": %.2f,\n", indent + 2, "", hdr_mean(h));
-    fprintf(out, "%*s\"stdev\": %.2f", indent + 2, "", hdr_stddev(h));
+    fprintf(out, "%*s\"mean\": %g,\n", indent + 2, "", hdr_mean(h));
+    fprintf(out, "%*s\"stdev\": %g", indent + 2, "", hdr_stddev(h));
 
     for (int i = 0; i < cfg.num_percentiles; i++) {
         double p = cfg.percentiles[i];
