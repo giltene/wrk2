@@ -16,3 +16,7 @@ deps/luajit/src/luajit
 
 .idea
 CMakeLists.txt
+
+# Nix
+result
+result-*
