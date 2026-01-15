@@ -1,0 +1,4 @@
+[submodule "deps/luajit"]
+	path = deps/luajit
+	url = https://github.com/openresty/luajit2.git
+	branch = v2.1-agentzh
