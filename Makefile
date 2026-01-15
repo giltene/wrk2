@@ -10,9 +10,9 @@ else ifeq ($(TARGET), darwin)
 	# Per https://luajit.org/install.html: If MACOSX_DEPLOYMENT_TARGET
 	# is not set then it's forced to 10.4, which breaks compile on Mojave.
 	export MACOSX_DEPLOYMENT_TARGET = $(shell sw_vers -productVersion)
-	LDFLAGS += -pagezero_size 10000 -image_base 100000000
-	LIBS += -L/usr/local/opt/openssl/lib
-	CFLAGS += -I/usr/local/include -I/usr/local/opt/openssl/include
+	OPENSSL_PREFIX := $(shell brew --prefix openssl 2>/dev/null || echo /usr/local/opt/openssl)
+	LIBS += -L$(OPENSSL_PREFIX)/lib
+	CFLAGS += -I/usr/local/include -I$(OPENSSL_PREFIX)/include
 else ifeq ($(TARGET), linux)
         CFLAGS  += -D_POSIX_C_SOURCE=200809L -D_BSD_SOURCE
 	LIBS    += -ldl
@@ -52,6 +52,7 @@ $(ODIR):
 $(ODIR)/bytecode.o: src/wrk.lua
 	@echo LUAJIT $<
 	@$(SHELL) -c 'cd $(LDIR) && ./luajit -b $(CURDIR)/$< $(CURDIR)/$@'
+	@ld -r $(CURDIR)/$@ -o $(CURDIR)/$@.tmp && mv $(CURDIR)/$@.tmp $(CURDIR)/$@
 
 $(ODIR)/%.o : %.c
 	@echo CC $<
