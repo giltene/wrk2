@@ -50,8 +50,10 @@ $(ODIR):
 	@mkdir -p $@
 
 $(ODIR)/bytecode.o: src/wrk.lua
-	@echo LUAJIT $<
-	@$(SHELL) -c 'cd $(LDIR) && ./luajit -b $(CURDIR)/$< $(CURDIR)/$@'
+        @echo LUAJIT $<
+        @LUA_PATH="$(CURDIR)/$(LDIR)/?.lua;;" $(LDIR)/luajit -b $< $(ODIR)/bytecode.c
+        @$(CC) -c $(ODIR)/bytecode.c -o $@
+        @rm $(ODIR)/bytecode.c
 
 $(ODIR)/%.o : %.c
 	@echo CC $<
